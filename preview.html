@@ -482,6 +482,32 @@ body,.sm-root{
   border:1px solid var(--acc-line); box-shadow:0 40px 120px -40px var(--acc);
 }
 
+/* ── dormant: the once-a-day pre-wake state ────────────────
+   Deliberately much quieter than #boot — this is "asleep," not "starting up."
+   No progress bar, no lines, nothing scanning. Just a slow breathing mark and
+   a background continuous-recognition loop listening for the wake phrase. */
+#dormant{
+  position:fixed; inset:0; z-index:55; display:grid; place-items:center;
+  background:#000; cursor:pointer;
+  transition:opacity .6s var(--ease);
+}
+#dormant.waking{ opacity:0; pointer-events:none; }
+.dormant-inner{ text-align:center; }
+.dormant-mark{
+  width:52px; height:52px; margin:0 auto 22px; border-radius:50%;
+  border:1px solid rgba(55,230,208,.32);
+  box-shadow:0 0 44px -12px rgba(55,230,208,.55);
+  animation:dormantBreathe 3.4s ease-in-out infinite;
+}
+@keyframes dormantBreathe{
+  0%,100%{ opacity:.3; transform:scale(.92); }
+  50%{ opacity:.85; transform:scale(1); }
+}
+.dormant-caption{
+  font:400 9.5px/1 var(--mono); letter-spacing:.26em; text-transform:uppercase;
+  color:var(--ink-faint);
+}
+
 /* ── boot ───────────────────────────────────────────────── */
 #boot{
   position:fixed; inset:0; z-index:60; display:grid; place-items:center;
@@ -551,6 +577,14 @@ body,.sm-root{
     <div class="boot-lines" id="bootLines"></div>
     <div class="boot-bar"><i id="bootFill"></i></div>
     <div class="boot-skip">press any key to skip</div>
+  </div>
+</div>
+
+<!-- ══ dormant — the once-a-day pre-wake state ══ -->
+<div id="dormant" hidden>
+  <div class="dormant-inner">
+    <div class="dormant-mark"></div>
+    <div class="dormant-caption">standing by · say the wake phrase</div>
   </div>
 </div>
 
@@ -886,7 +920,7 @@ function detachMic(){
 
 function liveAnalyser(){
   if (stateName === 'speaking' && bus.outAnalyser) return bus.outAnalyser;
-  if (bus.micAnalyser && convo) return bus.micAnalyser;
+  if (bus.micAnalyser && (convo || pttArmed)) return bus.micAnalyser;
   return null;
 }
 
@@ -1042,7 +1076,7 @@ const micMeter = (() => {
     const w = cv.clientWidth, h = cv.clientHeight;
     if (!w) return;
     if (cv.width !== w) { cv.width = w; cv.height = h; }
-    vals[i = (i + 1) % N] = convo ? clamp(rmsOf(bus.micAnalyser) * 5, 0, 1) : 0;
+    vals[i = (i + 1) % N] = (convo || pttArmed) ? clamp(rmsOf(bus.micAnalyser) * 5, 0, 1) : 0;
     ctx.clearRect(0, 0, w, h);
     const bw = w / N;
     ctx.fillStyle = getComputedStyle(document.getElementById('smRoot')).getPropertyValue('--acc').trim() || '#37e6d0';
@@ -1457,6 +1491,7 @@ async function sendVoiceTurn(text){
 
 const COMMANDS = [
   ['/new',         'Fresh Hermes thread'],
+  ['/briefing',    'The once-a-day wake report'],
   ['/mac',         'Do something on the Mac'],
   ['/screen',      'Capture the Mac screen'],
   ['/browser',     'Chrome / browser operation'],
@@ -1773,6 +1808,244 @@ setInterval(async () => {
   } catch(_){}
 }, 4000);
 
+/* ══════════════ 10b. the wake phrase ══════════════
+   Once a day, the HUD boots into "dormant" — near-black, a slow breathing
+   mark, nothing else — and runs a background speech recognizer listening only
+   for the wake phrase. Say it, and the daily briefing runs. After that, wake-
+   phrase listening turns off until the calendar date changes; every other
+   activation that day goes through push-to-talk (long-press Control) or the
+   Voice button instead.
+
+   This deliberately never touches Fish Audio — streaming the mic to a paid
+   STT endpoint all day just to catch one phrase would be both slow and not
+   free. The browser's own recognizer is free and already running locally. */
+
+const WAKE_PHRASE = /\bwake\s*up\b[\s\S]{0,24}\bdad(?:dy)?'?s?\b[\s\S]{0,24}\bhome\b/i;
+const WAKE_STORE_KEY = 'supermaks.lastWakeDate';
+
+let dormantOn = false, wakeActive = false, wakeRecognition = null;
+
+const today = () => new Date().toDateString();
+function alreadyWokenToday(){
+  try { return localStorage.getItem(WAKE_STORE_KEY) === today(); } catch(_){ return false; }
+}
+function markWoken(){
+  try { localStorage.setItem(WAKE_STORE_KEY, today()); } catch(_){}
+}
+
+function enterDormant(){
+  if (!SpeechRecognition){
+    log('note','WAKE','no speech recognition in this browser — skipping the wake phrase, use Control or the Voice button');
+    setState('standby','awaiting uplink');
+    return;
+  }
+  dormantOn = true;
+  $('#dormant').hidden = false;
+  $('#dormant').classList.remove('waking');
+  log('voice','WAKE','listening for the wake phrase');
+  startWakeListening();
+}
+
+function exitDormant(){
+  dormantOn = false;
+  stopWakeListening();
+  $('#dormant').classList.add('waking');
+  setTimeout(() => { $('#dormant').hidden = true; }, 650);
+}
+
+function startWakeListening(){
+  if (!SpeechRecognition || wakeActive) return;
+  wakeActive = true;
+  armWakeRecognizer();
+}
+function stopWakeListening(){
+  wakeActive = false;
+  if (wakeRecognition){
+    try { wakeRecognition.onend = null; wakeRecognition.stop(); } catch(_){}
+    wakeRecognition = null;
+  }
+}
+function armWakeRecognizer(){
+  if (!wakeActive) return;
+  wakeRecognition = new SpeechRecognition();
+  wakeRecognition.lang = 'en-US';
+  wakeRecognition.continuous = true;
+  wakeRecognition.interimResults = true;
+  wakeRecognition.onresult = e => {
+    for (let i = e.resultIndex; i < e.results.length; i++){
+      if (WAKE_PHRASE.test(e.results[i][0].transcript)) { handleWake(); return; }
+    }
+  };
+  // Chrome silently ends continuous recognition after a stretch of silence.
+  // Re-arm it as long as we're still meant to be listening.
+  wakeRecognition.onerror = () => {};
+  wakeRecognition.onend = () => { if (wakeActive) setTimeout(armWakeRecognizer, 250); };
+  try { wakeRecognition.start(); } catch(_){ if (wakeActive) setTimeout(armWakeRecognizer, 400); }
+}
+
+function handleWake(){
+  if (!dormantOn) return;
+  markWoken();
+  exitDormant();
+  log('voice','WAKE','wake phrase heard');
+  setTimeout(() => transmit('/briefing'), 650);   // let the exit animation clear first
+}
+
+// A tap on the dormant screen is the failsafe if the mic never catches it.
+$('#dormant').addEventListener('click', handleWake);
+
+// If the tab is left open across midnight, re-arm without needing a reload.
+setInterval(() => {
+  if (!dormantOn && !running && !convo && !pttArmed && !alreadyWokenToday()) enterDormant();
+}, 5 * 60 * 1000);
+
+/* ══════════════ 10c. push-to-talk — long-press Control ══════════════
+   Hold Control past a short threshold to arm the mic; it stops the instant
+   you release the key OR the instant you stop talking, whichever comes
+   first — no 900ms silence tax like the continuous conversation loop uses.
+   A tap that doesn't clear the threshold does nothing, so it can't be
+   triggered by an accidental brush of the key. */
+
+const PTT_HOLD_MS = 320;      // how long Control must be held to count as a long-press
+const PTT_SILENCE_MS = 220;   // near-instant endpointing once armed
+const PTT_CALIBRATE_MS = 140;
+const PTT_MAX_MS = 15000;
+
+let pttTimer = null, pttArmed = false, pttStream = null, pttRecorder = null, pttChunks = [];
+let pttRecognition = null, pttVad = null, pttSpoke = false, pttLoudAt = 0, pttStartedAt = 0;
+let pttThreshold = 0.02, pttCalibrating = true, pttFloorSum = 0, pttFloorN = 0;
+
+document.addEventListener('keydown', e => {
+  if (e.key !== 'Control' || e.repeat) return;
+  if (dormantOn || running || convo || pttArmed || pttTimer) return;
+  pttTimer = setTimeout(startPTT, PTT_HOLD_MS);
+});
+document.addEventListener('keyup', e => {
+  if (e.key !== 'Control') return;
+  if (pttTimer){ clearTimeout(pttTimer); pttTimer = null; }
+  if (pttArmed) stopPTT();
+});
+// A held key with no matching keyup (alt-tab, a browser dialog stealing
+// focus) must not leave the mic stuck open.
+window.addEventListener('blur', () => {
+  if (pttTimer){ clearTimeout(pttTimer); pttTimer = null; }
+  if (pttArmed) stopPTT();
+});
+
+async function startPTT(){
+  pttTimer = null;
+  if (dormantOn || running || convo) return;
+  micButton(true, 'Listening');
+  setState('listening','listening…');
+
+  if (RT.stt){
+    try {
+      pttStream = micStream || await navigator.mediaDevices.getUserMedia(
+        {audio:{echoCancellation:true, noiseSuppression:true, autoGainControl:true}});
+    } catch(e){
+      log('error','VOICE','microphone blocked — allow it for this page');
+      micButton(false,'Voice'); setState('standby','awaiting uplink');
+      return;
+    }
+    if (!bus.micAnalyser) attachMic(pttStream);
+    pttArmed = true;
+    pttChunks = []; pttSpoke = false; pttCalibrating = true;
+    pttFloorSum = 0; pttFloorN = 0; pttThreshold = 0.02;
+    pttRecorder = new MediaRecorder(pttStream, pickMime());
+    pttRecorder.ondataavailable = e => { if (e.data?.size) pttChunks.push(e.data); };
+    pttRecorder.onstop = shipPTT;
+    pttRecorder.start(100);
+    pttStartedAt = performance.now();
+    pttVad = setInterval(pttTick, 25);
+    return;
+  }
+
+  if (SpeechRecognition){
+    pttArmed = true;
+    pttRecognition = new SpeechRecognition();
+    pttRecognition.lang = 'en-US';
+    pttRecognition.interimResults = true;
+    pttRecognition.continuous = false;
+    let finalText = '';
+    pttRecognition.onresult = e => {
+      for (let i = e.resultIndex; i < e.results.length; i++){
+        const t = e.results[i][0].transcript;
+        if (e.results[i].isFinal) finalText += t;
+        else setSub('heard: ' + t.slice(0, 44));
+      }
+    };
+    pttRecognition.onerror = () => {};
+    pttRecognition.onend = async () => {
+      pttArmed = false; pttRecognition = null;
+      micButton(false,'Voice');
+      const text = finalText.trim();
+      if (!text){ setState('standby','nothing heard'); return; }
+      await sendVoiceTurn(text);
+    };
+    try { pttRecognition.start(); } catch(_){ pttArmed = false; micButton(false,'Voice'); }
+    return;
+  }
+
+  log('error','VOICE','no speech recognition available');
+  micButton(false,'Voice'); setState('standby','awaiting uplink');
+}
+
+function pttTick(){
+  if (!pttArmed || !bus.micAnalyser) return;
+  const rms = rmsOf(bus.micAnalyser);
+  const t = performance.now();
+
+  if (pttCalibrating){
+    pttFloorSum += rms; pttFloorN++;
+    if (t - pttStartedAt > PTT_CALIBRATE_MS){
+      pttThreshold = Math.max(0.006, (pttFloorSum / Math.max(1, pttFloorN)) * 1.6 + 0.003);
+      pttCalibrating = false;
+    }
+    return;
+  }
+
+  if (rms > pttThreshold){
+    pttLoudAt = t;
+    if (!pttSpoke){ pttSpoke = true; setSub('speech detected'); }
+  } else if (pttSpoke && t - pttLoudAt > PTT_SILENCE_MS){
+    return stopPTT();                              // stops the instant speech ends
+  }
+  if (t - pttStartedAt > PTT_MAX_MS) stopPTT();
+}
+
+// The single stop path for the recorder-based (Fish Audio) branch — called on
+// key release, on silence, on blur, whichever happens first.
+function stopPTT(){
+  if (!pttArmed) return;
+  pttArmed = false;
+  if (pttVad){ clearInterval(pttVad); pttVad = null; }
+  if (pttRecognition){ try { pttRecognition.stop(); } catch(_){} return; }  // → its own onend
+  if (pttRecorder && pttRecorder.state === 'recording'){ try { pttRecorder.stop(); } catch(_){} }
+}
+
+async function shipPTT(){
+  const blob = new Blob(pttChunks, {type: pttRecorder?.mimeType || 'audio/webm'});
+  pttChunks = [];
+  micButton(false,'Voice');
+  detachMic();
+  if (pttStream && pttStream !== micStream){ pttStream.getTracks().forEach(t => t.stop()); }
+  pttStream = null;
+
+  if (!pttSpoke || blob.size < 900){ setState('standby','nothing heard'); return; }
+  setState('transcribing','transcribing…');
+  try {
+    const r = await api('/api/listen', {
+      method:'POST', headers:headers({'content-type': blob.type || 'audio/webm'}), body:blob,
+    }).then(r => r.json());
+    const text = (r.text || '').trim();
+    if (!text){ log('voice','VOICE','nothing transcribed'); setState('standby','nothing heard'); return; }
+    await sendVoiceTurn(text);
+  } catch(e){
+    log('error','VOICE','transcription failed');
+    setState('fault','transcription failed');
+  }
+}
+
 /* ══════════════ 11. boot ══════════════ */
 
 const BOOT_LINES = [
@@ -1817,7 +2090,9 @@ function bootSequence(){
   await boot;
 
   document.getElementById('smRoot').classList.remove('state-boot');
-  setState('standby','awaiting uplink');
+
+  if (alreadyWokenToday()) setState('standby','awaiting uplink');
+  else enterDormant();
 
   if (RT.mac){
     pollMac(); grabScreenshot();
@@ -1899,9 +2174,11 @@ function mockFetch(url, opts = {}){
 
   if (url === '/api/run'){
     const msg = JSON.parse(opts.body || '{}').message || '';
-    const reply = msg.startsWith('/')
+    const reply = /^\/briefing\b/.test(msg)
+      ? 'Welcome home, sir. Three new emails, and two things on the calendar today — one of which is a meeting titled simply "sync," which tells me nothing and concerns me slightly. Shall I clear out the newsletters while you decide?'
+      : msg.startsWith('/')
       ? `Demo response to ${msg.split(' ')[0]}. The real backend answers this through Hermes.`
-      : 'Running in demo mode, so there is no agent behind me yet. Everything you see — the reactor, the streaming, the Mac panel — is the real interface.';
+      : 'Running in demo mode, so there is no agent behind me yet. Everything you see — the reactor, the streaming, the Mac panel, the wake phrase — is the real interface.';
     const events = [
       {t:'status', tools:7, profile:'default', permission:'normal'},
       {t:'latency', ms:210},

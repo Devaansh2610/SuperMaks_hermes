@@ -479,6 +479,32 @@ body{
   border:1px solid var(--acc-line); box-shadow:0 40px 120px -40px var(--acc);
 }
 
+/* ── dormant: the once-a-day pre-wake state ────────────────
+   Deliberately much quieter than #boot — this is "asleep," not "starting up."
+   No progress bar, no lines, nothing scanning. Just a slow breathing mark and
+   a background continuous-recognition loop listening for the wake phrase. */
+#dormant{
+  position:fixed; inset:0; z-index:55; display:grid; place-items:center;
+  background:#000; cursor:pointer;
+  transition:opacity .6s var(--ease);
+}
+#dormant.waking{ opacity:0; pointer-events:none; }
+.dormant-inner{ text-align:center; }
+.dormant-mark{
+  width:52px; height:52px; margin:0 auto 22px; border-radius:50%;
+  border:1px solid rgba(55,230,208,.32);
+  box-shadow:0 0 44px -12px rgba(55,230,208,.55);
+  animation:dormantBreathe 3.4s ease-in-out infinite;
+}
+@keyframes dormantBreathe{
+  0%,100%{ opacity:.3; transform:scale(.92); }
+  50%{ opacity:.85; transform:scale(1); }
+}
+.dormant-caption{
+  font:400 9.5px/1 var(--mono); letter-spacing:.26em; text-transform:uppercase;
+  color:var(--ink-faint);
+}
+
 /* ── boot ───────────────────────────────────────────────── */
 #boot{
   position:fixed; inset:0; z-index:60; display:grid; place-items:center;

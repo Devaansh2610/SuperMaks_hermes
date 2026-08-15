@@ -155,7 +155,7 @@ def take_finished():
         return done
 
 
-_CMD = re.compile(r"^\s*/(new|profile|goal|personality|kanban|mission|missions|background|tools|toolsets|connectors|connect|status|commands|help|browser|clear|mac|screen|voice)\b\s*(.*)$", re.I | re.S)
+_CMD = re.compile(r"^\s*/(new|profile|goal|personality|kanban|mission|missions|background|tools|toolsets|connectors|connect|status|commands|help|browser|clear|mac|screen|voice|briefing)\b\s*(.*)$", re.I | re.S)
 
 
 def _hermes_command(*args):
@@ -183,6 +183,7 @@ def _commands_reply():
 /goal <text|status|clear> — set/read/clear standing objective
 /profile <fact> — add a local profile note injected into Hermes prompts
 /personality <tone> — set the SuperMaks tone overlay
+/briefing — the once-a-day wake report: unread mail and today's calendar
 /kanban [task] — read/add mission queue item
 /mission [task] — alias for /kanban
 /background <mission> — run a Hermes mission asynchronously
@@ -227,6 +228,23 @@ def handle(message, runner=None):
         return dict(message=None, note="status read", reply=(
             f"SuperMaks online. profile={profile}; runtime={runtime}; "
             f"workdir={os.getcwd()}; voice={vo}; mac={mac.summary()}."))
+
+    if cmd == "briefing":
+        # Fired once a day by the wake phrase, or manually. The exact opening
+        # line is deliberate — everything after it is genuinely live, pulled
+        # through whatever mail/calendar tools this Hermes profile has.
+        return dict(message=(
+            "This is today's once-a-day wake briefing. Using your mail and calendar tools, "
+            "check how many new or unread emails have arrived today and what is on the "
+            "calendar for today.\n\n"
+            "Open with exactly the words \"Welcome home, sir.\" Then, in one or two more "
+            "sentences: state the email count and today's schedule, including one dry, "
+            "witty aside about whatever is actually on the calendar today — not a generic "
+            "joke, something that responds to the real content. Close with one short line "
+            "asking whether they would like anything done about the emails — offer, don't act.\n\n"
+            "If mail or calendar tools aren't available, say so in one plain line instead of "
+            "guessing at numbers."
+        ), note="daily wake briefing")
 
     if cmd == "voice":
         result = voice.check()
