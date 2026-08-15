@@ -21,7 +21,7 @@
   </div>
 </div>
 
-<!-- ══ dormant — the once-a-day pre-wake state ══ -->
+<!-- ══ dormant — the pre-wake state ══ -->
 <div id="dormant" hidden>
   <div class="dormant-inner">
     <div class="dormant-mark"></div>
@@ -31,152 +31,109 @@
 
 <!-- ══ ambient layers ══ -->
 <div class="fx-grid"></div>
-<div class="fx-glow g1"></div>
-<div class="fx-glow g2"></div>
-<div class="fx-scan"></div>
 <div class="fx-vignette"></div>
 <div class="fx-noise"></div>
 
-<!-- ══ top bar ══ -->
+<!-- ══ slim top bar ══ -->
 <header id="bar">
   <div class="brand">
-    <div class="sigil"><svg viewBox="0 0 40 40" aria-hidden="true">
-      <circle class="s-ring" cx="20" cy="20" r="17"/>
-      <circle class="s-arc" cx="20" cy="20" r="13"/>
-      <circle class="s-core" cx="20" cy="20" r="5"/>
-    </svg></div>
-    <div class="wordmark">
-      <div class="wm-over">Hermes Agent · direct channel</div>
-      <div class="wm-name">SUPERMAKS</div>
-    </div>
+    <span class="brand-name">SUPERMAKS</span>
   </div>
-
   <div class="bar-pills">
-    <div class="pill" id="pillBrain"><i></i><span>brain</span><b>probing</b></div>
-    <div class="pill" id="pillVoice"><i></i><span>voice</span><b>—</b></div>
-    <div class="pill" id="pillMac"><i></i><span>mac</span><b>—</b></div>
-    <div class="pill" id="pillProfile"><i></i><span>profile</span><b>default</b></div>
+    <div class="pill" id="pillBrain"><i></i><b>—</b></div>
+    <div class="pill" id="pillVoice"><i></i><b>—</b></div>
+    <div class="pill" id="pillMac"><i></i><b>—</b></div>
+    <div class="pill" id="pillProfile"><i></i><b>—</b></div>
   </div>
-
   <div class="bar-right">
-    <button class="ghostbtn" id="paletteBtn" title="Command palette">⌘K</button>
+    <button class="ghostbtn" id="paletteBtn" title="Command palette (⌘K)">⌘K</button>
     <div class="clock" id="clock">--:--:--</div>
   </div>
 </header>
 
-<!-- ══ hud ══ -->
-<main id="hud">
+<!-- ══ the stage: nothing here but the reactor ══ -->
+<main id="stage">
+  <div class="reactor-wrap" id="reactorWrap" title="Click to start or stop voice">
+    <canvas id="core"></canvas>
+    <div class="reactor-readout">
+      <div class="r-state" id="stateWord">STANDBY</div>
+      <div class="r-sub" id="stateSub">awaiting uplink</div>
+    </div>
+  </div>
+  <div id="subtitle" aria-live="polite"></div>
+</main>
 
-  <!-- ─── left ─── -->
-  <aside class="col" id="left">
-    <section class="panel grow">
-      <header class="ph"><h2>Command Matrix</h2><span class="ph-sub">click to run · payload commands stay armed</span></header>
-      <div class="cmds" id="cmds">
-        <button class="cmd" data-cmd="/new"><b>/new</b><span>Fresh thread</span></button>
-        <button class="cmd" data-cmd="/mac"><b>/mac</b><span>Drive the Mac</span></button>
-        <button class="cmd" data-cmd="/screen"><b>/screen</b><span>Capture Mac screen</span></button>
-        <button class="cmd" data-cmd="/browser"><b>/browser</b><span>Chrome operation</span></button>
-        <button class="cmd" data-cmd="/goal"><b>/goal</b><span>Standing objective</span></button>
-        <button class="cmd" data-cmd="/background"><b>/background</b><span>Async mission</span></button>
-        <button class="cmd" data-cmd="/mission"><b>/mission</b><span>Mission queue</span></button>
-        <button class="cmd" data-cmd="/personality"><b>/personality</b><span>Tone overlay</span></button>
-        <button class="cmd" data-cmd="/tools"><b>/tools</b><span>Hermes tools</span></button>
-        <button class="cmd" data-cmd="/commands"><b>/commands</b><span>All commands</span></button>
-      </div>
-    </section>
+<!-- ══ edge handles — the only chrome that stays on screen ══ -->
+<button class="handle h-left"   id="hLeft"   aria-label="Commands (1)"><span>COMMANDS</span></button>
+<button class="handle h-right"  id="hRight"  aria-label="Telemetry (2)"><span>TELEMETRY</span></button>
+<button class="handle h-bottom" id="hBottom" aria-label="Transcript (3)"><span>TRANSCRIPT</span></button>
 
-    <section class="panel">
-      <header class="ph"><h2>Inherited Tools</h2><span class="ph-sub" id="toolCount">—</span></header>
+<!-- ══ drawer · left ══ -->
+<aside class="drawer left" id="drawerLeft" hidden>
+  <div class="drawer-in">
+    <header class="dh"><h2>Command Matrix</h2><button class="dclose" data-close="left">✕</button></header>
+
+    <div class="cmds" id="cmds">
+      <button class="cmd" data-cmd="/new"><b>/new</b><span>Fresh thread</span></button>
+      <button class="cmd" data-cmd="/briefing"><b>/briefing</b><span>Wake report</span></button>
+      <button class="cmd" data-cmd="/mac"><b>/mac</b><span>Drive the Mac</span></button>
+      <button class="cmd" data-cmd="/screen"><b>/screen</b><span>Capture screen</span></button>
+      <button class="cmd" data-cmd="/browser"><b>/browser</b><span>Chrome operation</span></button>
+      <button class="cmd" data-cmd="/goal"><b>/goal</b><span>Standing objective</span></button>
+      <button class="cmd" data-cmd="/background"><b>/background</b><span>Async mission</span></button>
+      <button class="cmd" data-cmd="/mission"><b>/mission</b><span>Mission queue</span></button>
+      <button class="cmd" data-cmd="/personality"><b>/personality</b><span>Tone overlay</span></button>
+      <button class="cmd" data-cmd="/tools"><b>/tools</b><span>Hermes tools</span></button>
+      <button class="cmd" data-cmd="/commands"><b>/commands</b><span>All commands</span></button>
+    </div>
+
+    <section class="block">
+      <div class="blabel">Inherited tools <em id="toolCount">—</em></div>
       <div class="chips" id="toolsList"><span class="chip ghost">reading tool matrix…</span></div>
     </section>
 
-    <section class="panel">
-      <header class="ph"><h2>Uplink</h2><span class="ph-sub" id="armedTag"></span></header>
-      <div class="composer">
-        <textarea id="input" rows="3" spellcheck="false"
-          placeholder="Speak, or type an instruction. Slash commands supported."></textarea>
-        <div class="composer-foot">
-          <span class="hint" id="tip">Try <b>/mac</b> “open my calendar and tell me what’s next”.</span>
-          <span class="keyhint">⌘↵</span>
-        </div>
-      </div>
+    <section class="block">
+      <div class="blabel">Uplink <em id="armedTag"></em></div>
+      <textarea id="input" rows="3" spellcheck="false"
+        placeholder="Speak, or type an instruction. Slash commands supported."></textarea>
+      <div class="keyrow"><span>⌘↵ send</span><span>hold ⌃ to talk</span></div>
     </section>
-  </aside>
+  </div>
+</aside>
 
-  <!-- ─── centre ─── -->
-  <section class="col" id="mid">
-    <div class="reactor">
-      <canvas id="core" aria-label="SuperMaks reactor"></canvas>
-      <div class="reactor-hud">
-        <div class="r-label">SUPERMAKS CORE</div>
-        <div class="r-state" id="stateWord">STANDBY</div>
-        <div class="r-sub" id="stateSub">awaiting uplink</div>
-      </div>
-      <div class="reactor-corners"><i></i><i></i><i></i><i></i></div>
+<!-- ══ drawer · right ══ -->
+<aside class="drawer right" id="drawerRight" hidden>
+  <div class="drawer-in">
+    <header class="dh"><h2>Telemetry</h2><button class="dclose" data-close="right">✕</button></header>
+
+    <div class="tele">
+      <div class="trow"><span>Session</span><b id="sessionTag">none</b></div>
+      <div class="trow"><span>Gateway</span><b id="tGateway">—</b></div>
+      <div class="trow"><span>Runtime</span><b id="tRuntime">—</b></div>
+      <div class="trow"><span>Profile</span><b id="tProfile">—</b></div>
+      <div class="trow"><span>Permission</span><b id="tPerm">—</b></div>
+      <div class="trow"><span>Speech</span><b id="tVoice">—</b></div>
+      <div class="trow"><span>Workdir</span><b id="tWork">—</b></div>
     </div>
 
-    <section class="panel response" id="responsePanel">
-      <header class="ph">
-        <h2>Response</h2>
-        <span class="rtag" id="rtag">idle</span>
-        <span class="ph-spacer"></span>
-        <span class="ph-sub" id="latency"></span>
-      </header>
-      <div class="rbody" id="response"><span class="placeholder">Standing by. Transmit an instruction.</span></div>
-    </section>
-
-    <div class="transport">
-      <button id="mic" class="tbtn mic">
-        <span class="tdot"></span><span class="tlabel">Voice</span>
-        <canvas class="tmeter" id="micMeter"></canvas>
-      </button>
-      <button id="run" class="tbtn primary"><span class="tlabel">Transmit</span><span class="tarrow">▸</span></button>
-      <button id="stop" class="tbtn danger" hidden><span class="tlabel">Stop</span></button>
-      <button id="mute" class="tbtn icon" title="Mute speech">🔊</button>
-      <button id="clearBtn" class="tbtn icon" title="Clear response">⌫</button>
-    </div>
-  </section>
-
-  <!-- ─── right ─── -->
-  <aside class="col" id="right">
-    <section class="panel">
-      <header class="ph"><h2>Telemetry</h2><span class="ph-sub" id="sessionTag">no session</span></header>
-      <div class="tele">
-        <div class="trow"><span>Gateway</span><b id="tGateway">—</b></div>
-        <div class="trow"><span>Runtime</span><b id="tRuntime">—</b></div>
-        <div class="trow"><span>Profile</span><b id="tProfile">—</b></div>
-        <div class="trow"><span>Permission</span><b id="tPerm">—</b></div>
-        <div class="trow"><span>Speech</span><b id="tVoice">—</b></div>
-        <div class="trow"><span>Workdir</span><b id="tWork">—</b></div>
-      </div>
-    </section>
-
-    <section class="panel" id="macPanel">
-      <header class="ph">
-        <h2>Mac Bridge</h2>
-        <span class="ph-spacer"></span>
-        <button class="ghostbtn sm" id="macRefresh" title="Refresh screenshot">↻</button>
-      </header>
-
+    <section class="block">
+      <div class="blabel">Mac bridge <button class="mini" id="macRefresh" title="Refresh screenshot">↻</button></div>
       <div class="macline">
         <span class="dot" id="macDot"></span>
         <b id="macName">—</b>
         <span class="macdetail" id="macDetail">checking…</span>
       </div>
-
       <button class="shot" id="shotWrap" title="Click to enlarge">
         <img id="shot" alt="">
         <div class="shot-empty" id="shotEmpty">no capture yet</div>
         <div class="shot-scan"></div>
       </button>
-
       <div class="macstats">
         <div><span>front</span><b id="macFront">—</b></div>
         <div><span>battery</span><b id="macBatt">—</b></div>
         <div><span>volume</span><b id="macVol">—</b></div>
         <div><span>up</span><b id="macUp">—</b></div>
       </div>
-
       <div class="macacts" id="macActs">
         <button data-mac="lock">Lock</button>
         <button data-mac="playpause">Play/Pause</button>
@@ -187,10 +144,8 @@
       </div>
     </section>
 
-    <section class="panel grow logpanel">
-      <header class="ph">
-        <h2>Event Stream</h2>
-        <span class="ph-spacer"></span>
+    <section class="block grow">
+      <div class="blabel">Event stream
         <div class="filters" id="logFilters">
           <button class="on" data-f="all">all</button>
           <button data-f="agent">agent</button>
@@ -198,11 +153,36 @@
           <button data-f="mac">mac</button>
           <button data-f="error">faults</button>
         </div>
-      </header>
+      </div>
       <div class="log" id="log"></div>
     </section>
-  </aside>
-</main>
+  </div>
+</aside>
+
+<!-- ══ drawer · bottom (transcript + transport) ══ -->
+<section class="drawer bottom" id="drawerBottom" hidden>
+  <div class="drawer-in">
+    <header class="dh">
+      <h2>Transcript</h2>
+      <span class="rtag" id="rtag">idle</span>
+      <span class="dh-spacer"></span>
+      <span class="dh-sub" id="latency"></span>
+      <button class="pin" id="pinBottom" title="Keep open">PIN</button>
+      <button class="dclose" data-close="bottom">✕</button>
+    </header>
+    <div class="rbody" id="response"><span class="placeholder">Standing by.</span></div>
+    <div class="transport">
+      <button id="mic" class="tbtn mic">
+        <span class="tdot"></span><span class="tlabel">Voice</span>
+        <canvas class="tmeter" id="micMeter"></canvas>
+      </button>
+      <button id="run" class="tbtn primary"><span class="tlabel">Transmit</span><span class="tarrow">▸</span></button>
+      <button id="stop" class="tbtn danger" hidden><span class="tlabel">Stop</span></button>
+      <button id="mute" class="tbtn icon" title="Mute speech">🔊</button>
+      <button id="clearBtn" class="tbtn icon" title="Clear transcript">⌫</button>
+    </div>
+  </div>
+</section>
 
 <!-- ══ Mac action approvals ══ -->
 <div id="approvals"></div>

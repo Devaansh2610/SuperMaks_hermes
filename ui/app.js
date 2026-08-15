@@ -19,6 +19,11 @@ const TOKEN = document.querySelector('meta[name="supermaks-token"]')?.content ||
 const DEMO = !TOKEN || TOKEN === '__SUPERMAKS_' + 'TOKEN__' || location.protocol === 'file:';
 const headers = extra => ({'x-supermaks-token': TOKEN, ...(extra || {})});
 
+/* The element carrying the state-* and open-* classes that drive the whole
+   theme. It's <body> in the real app; the single-file preview bundle swaps
+   this one line for its wrapper div, so no other code has to care. */
+const ROOT_EL = document.body;
+
 const RT = {tts:false, stt:false, browserStt:false, browserTts:false, mac:false};
 const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
 const speechSynth = window.speechSynthesis;
@@ -47,7 +52,12 @@ let stateName = 'standby';
 function setState(name, sub){
   stateName = name;
   const [word, cls] = STATES[name] || STATES.standby;
-  document.body.className = cls ? 'state-' + cls : '';
+  // Touch only the state-* classes. A blanket `className = ...` would also wipe
+  // the open-* drawer classes and the boot flag, silently closing whatever the
+  // user had open the moment the agent changed state.
+  const b = ROOT_EL;
+  [...b.classList].forEach(c => { if (c.startsWith('state-')) b.classList.remove(c); });
+  if (cls) b.classList.add('state-' + cls);
   $('#stateWord').textContent = word;
   if (sub != null) $('#stateSub').textContent = sub;
 }
@@ -153,132 +163,447 @@ function rmsOf(analyser){
   for (let i = 0; i < buf.length; i++){ const v = (buf[i] - 128) / 128; s += v * v; }
   return Math.sqrt(s / buf.length);
 }
+/* ══════════════ 4. the reactor ══════════════
+   A Mark-II-style arc reactor, drawn on canvas. Anatomy, centre outward:
 
-/* ══════════════ 4. the reactor ══════════════ */
+     plasma torus → containment rim → coil pack (10 windings) → segmented
+     bezel → counter-rotating gimbal rings → audio spectrum → machined
+     housing with bolts → bloom
+
+   The expensive parts (brushed metal, bolt heads, coil bodies, engraved
+   graduations) never change, so they're rendered once into an offscreen
+   canvas and blitted each frame. Only light moves per frame: plasma,
+   coil energy, gimbals, arc discharge, sparks, bloom. That keeps a very
+   dense image at 60fps.
+
+   Everything reactive is driven by real audio — the microphone while
+   listening, the speech playback while talking — so the reactor is an
+   instrument, not a decoration. */
 
 const reactor = (() => {
   const cv = $('#core');
   const ctx = cv.getContext('2d');
-  const BARS = 108;
+  const TAU = Math.PI * 2;
+
+  const SEG  = 10;                 // coil windings, like the Mark II
+  const BARS = 132;                // spectrum resolution
+
   const spectrum = new Float32Array(BARS);
-  let W = 0, H = 0, dpr = 1, t = 0, level = 0, raf = 0;
+  const coil     = new Float32Array(SEG);
+  const coilTarget = new Float32Array(SEG);
+
+  const still = document.createElement('canvas');   // the machined, unmoving parts
+  const sctx  = still.getContext('2d');
+
+  let W = 0, H = 0, dpr = 1, cx = 0, cy = 0, R = 0;
+  let t = 0, level = 0, raf = 0, frame = 0;
+  let acc = '#37e6d0', acc2 = '#7ef4ff';
+  let bolt = [], discharge = [], sparks = [];
   const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  /* deterministic value noise — same housing wear pattern every launch */
+  const hash = n => { const s = Math.sin(n * 127.1) * 43758.5453; return s - Math.floor(s); };
+  const noise = x => {
+    const i = Math.floor(x), f = x - i, u = f * f * (3 - 2 * f);
+    return hash(i) * (1 - u) + hash(i + 1) * u;
+  };
 
   function resize(){
     dpr = Math.min(window.devicePixelRatio || 1, 2);
     const r = cv.getBoundingClientRect();
-    W = r.width; H = r.height;
+    W = Math.max(1, r.width); H = Math.max(1, r.height);
     cv.width = W * dpr; cv.height = H * dpr;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    cx = W / 2; cy = H / 2; R = Math.min(W, H) / 2;
+    buildStill();
   }
   new ResizeObserver(resize).observe(cv);
 
-  const css = n => getComputedStyle(document.body).getPropertyValue(n).trim();
+  /* ── the unmoving machine ─────────────────────────────── */
 
-  function frame(){
-    raf = requestAnimationFrame(frame);
-    t += reduce ? 0.002 : 0.016;
+  function ring(g, r0, r1){
+    g.beginPath();
+    g.arc(cx, cy, r1, 0, TAU);
+    g.arc(cx, cy, r0, TAU, 0, true);
+    g.closePath();
+  }
+
+  /* Brushed metal: hundreds of thin radial wedges at varying lightness,
+     then a directional light pass so it reads as a lit physical surface
+     rather than flat noise. */
+  function brushed(g, r0, r1, lightness, spread){
+    const steps = 420;
+    for (let i = 0; i < steps; i++){
+      const a0 = i / steps * TAU, a1 = (i + 1.4) / steps * TAU;
+      const n = noise(i * 0.09) * 0.6 + noise(i * 0.47) * 0.4;
+      g.fillStyle = `hsl(208 16% ${(lightness + (n - 0.5) * spread).toFixed(1)}%)`;
+      g.beginPath();
+      g.arc(cx, cy, r1, a0, a1);
+      g.arc(cx, cy, r0, a1, a0, true);
+      g.closePath(); g.fill();
+    }
+    // light from upper-left, shadow lower-right
+    g.save(); ring(g, r0, r1); g.clip();
+    const lg = g.createLinearGradient(cx - r1, cy - r1, cx + r1, cy + r1);
+    lg.addColorStop(0,   'rgba(255,255,255,.16)');
+    lg.addColorStop(.42, 'rgba(255,255,255,.02)');
+    lg.addColorStop(.62, 'rgba(0,0,0,.16)');
+    lg.addColorStop(1,   'rgba(0,0,0,.42)');
+    g.fillStyle = lg; g.fillRect(cx - r1, cy - r1, r1 * 2, r1 * 2);
+    g.restore();
+    // machined bevel edges
+    g.lineWidth = Math.max(1, R * 0.004);
+    g.strokeStyle = 'rgba(255,255,255,.10)';
+    g.beginPath(); g.arc(cx, cy, r1, 0, TAU); g.stroke();
+    g.strokeStyle = 'rgba(0,0,0,.55)';
+    g.beginPath(); g.arc(cx, cy, r0, 0, TAU); g.stroke();
+  }
+
+  function boltHead(g, a, r, rad){
+    const x = cx + Math.cos(a) * r, y = cy + Math.sin(a) * r;
+    const bg = g.createRadialGradient(x - rad * .4, y - rad * .4, rad * .1, x, y, rad);
+    bg.addColorStop(0, '#5d6c7d'); bg.addColorStop(.5, '#333e4c'); bg.addColorStop(1, '#141a22');
+    g.fillStyle = bg;
+    g.beginPath(); g.arc(x, y, rad, 0, TAU); g.fill();
+    g.strokeStyle = 'rgba(0,0,0,.6)'; g.lineWidth = Math.max(1, rad * .12);
+    g.beginPath(); g.arc(x, y, rad, 0, TAU); g.stroke();
+    // hex socket
+    g.fillStyle = 'rgba(0,0,0,.62)';
+    g.beginPath();
+    for (let k = 0; k < 6; k++){
+      const ha = a + k / 6 * TAU;
+      const hx = x + Math.cos(ha) * rad * .46, hy = y + Math.sin(ha) * rad * .46;
+      k ? g.lineTo(hx, hy) : g.moveTo(hx, hy);
+    }
+    g.closePath(); g.fill();
+    g.strokeStyle = 'rgba(255,255,255,.10)';
+    g.lineWidth = Math.max(.5, rad * .07);
+    g.beginPath(); g.arc(x, y, rad * .62, a + .6, a + 2.4); g.stroke();
+  }
+
+  function coilPath(g, i, r0, r1, pad){
+    const a = i / SEG * TAU - Math.PI / 2;
+    const half = TAU / SEG / 2 - pad;
+    g.beginPath();
+    g.arc(cx, cy, r1, a - half, a + half);
+    g.arc(cx, cy, r0, a + half * (r1 / r0) * .82, a - half * (r1 / r0) * .82, true);
+    g.closePath();
+  }
+
+  function buildStill(){
+    still.width = cv.width; still.height = cv.height;
+    sctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    sctx.clearRect(0, 0, W, H);
+    const g = sctx;
+    if (R <= 4) return;
+
+    // ── outer housing
+    brushed(g, R * .795, R * .972, 19, 14);
+    // bolt ring
+    bolt = [];
+    const bn = 12, br = R * .884, brad = R * .026;
+    for (let i = 0; i < bn; i++){
+      const a = i / bn * TAU - Math.PI / 2;
+      boltHead(g, a, br, brad);
+      bolt.push(a);
+    }
+    // engraved graduations on the housing inner lip
+    g.strokeStyle = 'rgba(190,220,235,.16)';
+    for (let i = 0; i < 180; i++){
+      const a = i / 180 * TAU, major = i % 15 === 0;
+      g.lineWidth = major ? Math.max(1, R * .005) : Math.max(.5, R * .002);
+      const r0 = R * (major ? .806 : .812);
+      g.beginPath();
+      g.moveTo(cx + Math.cos(a) * r0, cy + Math.sin(a) * r0);
+      g.lineTo(cx + Math.cos(a) * R * .828, cy + Math.sin(a) * R * .828);
+      g.stroke();
+    }
+
+    // ── mid bezel
+    brushed(g, R * .565, R * .60, 12, 9);
+
+    // ── coil pack bodies
+    const cr0 = R * .275, cr1 = R * .53;
+    for (let i = 0; i < SEG; i++){
+      coilPath(g, i, cr0, cr1, .034);
+      const a = i / SEG * TAU - Math.PI / 2;
+      const gx = cx + Math.cos(a) * cr0, gy = cy + Math.sin(a) * cr0;
+      const cg = g.createRadialGradient(gx, gy, cr0 * .1, cx, cy, cr1);
+      cg.addColorStop(0,   '#2a3340');
+      cg.addColorStop(.45, '#171e28');
+      cg.addColorStop(1,   '#0b1017');
+      g.fillStyle = cg; g.fill();
+      g.strokeStyle = 'rgba(150,190,215,.13)';
+      g.lineWidth = Math.max(1, R * .0035); g.stroke();
+
+      // windings
+      g.save(); coilPath(g, i, cr0, cr1, .034); g.clip();
+      const turns = 13;
+      for (let k = 0; k <= turns; k++){
+        const rr = cr0 + (cr1 - cr0) * (k / turns);
+        g.strokeStyle = k % 2 ? 'rgba(0,0,0,.42)' : 'rgba(196,150,96,.20)';
+        g.lineWidth = Math.max(.6, R * .0045);
+        g.beginPath(); g.arc(cx, cy, rr, 0, TAU); g.stroke();
+      }
+      g.restore();
+    }
+
+    // ── containment rim around the plasma chamber
+    brushed(g, R * .205, R * .268, 17, 10);
+
+    // ── chamber floor (dark, so the readout text stays legible)
+    const fg = g.createRadialGradient(cx, cy, 0, cx, cy, R * .21);
+    fg.addColorStop(0, '#05080d'); fg.addColorStop(1, '#020407');
+    g.fillStyle = fg;
+    g.beginPath(); g.arc(cx, cy, R * .21, 0, TAU); g.fill();
+  }
+
+  /* ── discharge arcs ───────────────────────────────────── */
+
+  function spawnDischarge(){
+    const seg = Math.floor(Math.random() * SEG);
+    const a = seg / SEG * TAU - Math.PI / 2;
+    const pts = [[R * .20, a + (Math.random() - .5) * .3], [R * .285, a + (Math.random() - .5) * .12]];
+    // midpoint displacement in polar space
+    for (let pass = 0; pass < 4; pass++){
+      const next = [pts[0]];
+      for (let i = 0; i < pts.length - 1; i++){
+        const [r1, a1] = pts[i], [r2, a2] = pts[i + 1];
+        const amp = (1 - pass / 5) * .09;
+        next.push([(r1 + r2) / 2, (a1 + a2) / 2 + (Math.random() - .5) * amp]);
+        next.push(pts[i + 1]);
+      }
+      pts.length = 0; pts.push(...next);
+    }
+    discharge.push({ pts, life: 1, seg });
+    coilTarget[seg] = 1;
+  }
+
+  /* ── the frame ────────────────────────────────────────── */
+
+  function draw(){
+    raf = requestAnimationFrame(draw);
+    frame++;
+    t += reduce ? 0.0016 : 0.016;
+
+    if (frame % 15 === 0){
+      const cs = getComputedStyle(ROOT_EL);
+      acc  = cs.getPropertyValue('--acc').trim()   || acc;
+      acc2 = cs.getPropertyValue('--acc-2').trim() || acc2;
+    }
 
     const analyser = liveAnalyser();
-    /* Idle breathing when there's no real audio, so a quiet core still looks
-       alive without pretending to visualise something. */
     const target = analyser ? clamp(rmsOf(analyser) * 4.2, 0, 1)
                             : 0.10 + Math.sin(t * 1.15) * 0.045;
-    level += (target - level) * 0.18;
-
-    const acc = css('--acc') || '#37e6d0';
-    const acc2 = css('--acc-2') || '#7ef4ff';
-    const cx = W / 2, cy = H / 2;
-    const R = Math.min(W, H) / 2 - 8;
+    level += (target - level) * 0.16;
 
     ctx.clearRect(0, 0, W, H);
-    if (R <= 0) return;
+    if (R <= 4) return;
 
-    // spectrum, mirrored so the ring reads symmetrically
+    // spectrum
     if (analyser){
       const freq = freqBuf(analyser);
       analyser.getByteFrequencyData(freq);
       const half = BARS / 2;
       for (let i = 0; i < half; i++){
-        const v = (freq[Math.floor(i / half * (freq.length * 0.62))] || 0) / 255;
-        spectrum[half + i] += (v - spectrum[half + i]) * 0.32;
+        const v = (freq[Math.floor(i / half * (freq.length * .58))] || 0) / 255;
+        spectrum[half + i] += (v - spectrum[half + i]) * .34;
         spectrum[half - 1 - i] = spectrum[half + i];
       }
     } else {
       for (let i = 0; i < BARS; i++){
-        const v = (Math.sin(t * 1.6 + i * 0.42) * 0.5 + 0.5) * (0.10 + level * 0.5);
-        spectrum[i] += (v - spectrum[i]) * 0.1;
+        const v = (Math.sin(t * 1.5 + i * .38) * .5 + .5) * (.08 + level * .45);
+        spectrum[i] += (v - spectrum[i]) * .09;
       }
     }
 
-    // ── outer tick ring
-    ctx.save(); ctx.translate(cx, cy); ctx.rotate(t * 0.055);
-    for (let i = 0; i < 120; i++){
-      const a = i / 120 * Math.PI * 2, major = i % 10 === 0;
-      const r0 = R * (major ? 0.955 : 0.975);
-      ctx.globalAlpha = major ? 0.5 : 0.2;
-      ctx.strokeStyle = acc; ctx.lineWidth = major ? 1.4 : 1;
+    // coil energy chases the spectrum, with a rotating bias so power
+    // visibly cycles around the ring
+    for (let i = 0; i < SEG; i++){
+      const s = spectrum[Math.floor(i / SEG * BARS)] || 0;
+      const sweep = Math.pow(Math.max(0, Math.sin(t * 1.1 - i / SEG * TAU)), 6);
+      coilTarget[i] = clamp(.16 + s * .9 + sweep * .5 + level * .3, 0, 1.4);
+      coil[i] += (coilTarget[i] - coil[i]) * .17;
+    }
+
+    ctx.drawImage(still, 0, 0, W, H);
+
+    // ── coil glow (additive, over the machined bodies)
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    const cr0 = R * .275, cr1 = R * .53;
+    for (let i = 0; i < SEG; i++){
+      const e = coil[i];
+      const a = i / SEG * TAU - Math.PI / 2;
+      const gx = cx + Math.cos(a) * cr0, gy = cy + Math.sin(a) * cr0;
+      // light emitted from the coil's inner edge and falling off outward —
+      // a filled wedge reads as a paper cutout, a gradient reads as glow
+      const cg = ctx.createRadialGradient(gx, gy, 0, gx, gy, (cr1 - cr0) * .95);
+      cg.addColorStop(0, acc2); cg.addColorStop(.22, acc); cg.addColorStop(1, 'rgba(0,0,0,0)');
+      ctx.globalAlpha = clamp(e * .42, 0, .7);
+      coilPath(ctx, i, cr0, cr1, .034);
+      ctx.fillStyle = cg; ctx.fill();
+      // bright inner tip
+      ctx.globalAlpha = clamp(e * .95, 0, 1);
+      ctx.strokeStyle = acc2;
+      ctx.lineWidth = Math.max(1.2, R * .008);
       ctx.beginPath();
-      ctx.moveTo(Math.cos(a) * r0, Math.sin(a) * r0);
-      ctx.lineTo(Math.cos(a) * R, Math.sin(a) * R);
+      const half = TAU / SEG / 2 - .034;
+      ctx.arc(cx, cy, cr0 * 1.01, a - half * .8, a + half * .8);
       ctx.stroke();
     }
     ctx.restore();
 
-    // ── rotating arc segments
-    const arcs = [
-      {r:0.90, from:0.00, len:1.15, sp: 0.30, w:2.2, a:0.85},
-      {r:0.80, from:2.20, len:0.85, sp:-0.22, w:1.6, a:0.55},
-      {r:0.71, from:4.10, len:1.70, sp: 0.16, w:1.1, a:0.35},
+    // ── counter-rotating gimbal rings
+    const gimbals = [
+      { r: .615, from: 0,    len: 1.25, sp:  .34, w: .0115, a: .9  },
+      { r: .672, from: 2.3,  len: .78,  sp: -.23, w: .0075, a: .62 },
+      { r: .724, from: 4.1,  len: 1.9,  sp:  .15, w: .005,  a: .4  },
+      { r: .758, from: 5.2,  len: .5,   sp: -.44, w: .009,  a: .75 },
     ];
-    for (const arc of arcs){
-      ctx.save(); ctx.translate(cx, cy);
-      ctx.globalAlpha = arc.a;
-      ctx.strokeStyle = acc2; ctx.lineWidth = arc.w; ctx.lineCap = 'round';
-      ctx.shadowBlur = 16; ctx.shadowColor = acc;
+    ctx.save(); ctx.globalCompositeOperation = 'lighter'; ctx.lineCap = 'round';
+    for (const gm of gimbals){
+      ctx.globalAlpha = gm.a * (.55 + level * .5);
+      ctx.strokeStyle = acc2;
+      ctx.shadowBlur = R * .05; ctx.shadowColor = acc;
+      ctx.lineWidth = Math.max(1, R * gm.w);
       ctx.beginPath();
-      ctx.arc(0, 0, R * arc.r, arc.from + t * arc.sp, arc.from + arc.len + t * arc.sp);
-      ctx.stroke();
-      ctx.restore();
-    }
-
-    // ── radial spectrum
-    const inner = R * 0.44, span = R * 0.22;
-    ctx.save(); ctx.translate(cx, cy); ctx.rotate(-Math.PI / 2);
-    for (let i = 0; i < BARS; i++){
-      const a = i / BARS * Math.PI * 2;
-      const h = span * (0.10 + spectrum[i] * 0.95);
-      ctx.globalAlpha = 0.25 + spectrum[i] * 0.75;
-      ctx.strokeStyle = i % 9 === 0 ? acc2 : acc;
-      ctx.lineWidth = 2; ctx.lineCap = 'round';
-      ctx.beginPath();
-      ctx.moveTo(Math.cos(a) * inner, Math.sin(a) * inner);
-      ctx.lineTo(Math.cos(a) * (inner + h), Math.sin(a) * (inner + h));
+      ctx.arc(cx, cy, R * gm.r, gm.from + t * gm.sp, gm.from + gm.len + t * gm.sp);
       ctx.stroke();
     }
     ctx.restore();
 
-    // ── core
-    const cr = R * (0.27 + level * 0.06);
-    const g = ctx.createRadialGradient(cx, cy - cr * 0.2, 0, cx, cy, cr);
-    g.addColorStop(0, '#ffffff');
-    g.addColorStop(0.22, acc2);
-    g.addColorStop(0.62, acc);
-    g.addColorStop(1, 'rgba(2,10,16,0)');
-    ctx.globalAlpha = 0.34 + level * 0.5;
-    ctx.fillStyle = g;
-    ctx.beginPath(); ctx.arc(cx, cy, cr, 0, Math.PI * 2); ctx.fill();
+    // ── audio spectrum ring
+    const sInner = R * .618, sSpan = R * .155;
+    ctx.save(); ctx.globalCompositeOperation = 'lighter';
+    ctx.translate(cx, cy); ctx.rotate(-Math.PI / 2);
+    ctx.shadowBlur = R * .03; ctx.shadowColor = acc;
+    ctx.lineCap = 'round';
+    for (let i = 0; i < BARS; i++){
+      const a = i / BARS * TAU;
+      const h = sSpan * (.07 + spectrum[i] * 1.1);
+      ctx.globalAlpha = .3 + spectrum[i] * .7;
+      ctx.strokeStyle = i % 11 === 0 ? acc2 : acc;
+      ctx.lineWidth = Math.max(1.3, R * .0055);
+      ctx.beginPath();
+      ctx.moveTo(Math.cos(a) * sInner, Math.sin(a) * sInner);
+      ctx.lineTo(Math.cos(a) * (sInner + h), Math.sin(a) * (sInner + h));
+      ctx.stroke();
+    }
+    ctx.restore();
 
-    ctx.globalAlpha = 0.65;
-    ctx.strokeStyle = acc; ctx.lineWidth = 1;
-    ctx.shadowBlur = 20; ctx.shadowColor = acc;
-    ctx.beginPath(); ctx.arc(cx, cy, cr, 0, Math.PI * 2); ctx.stroke();
-    ctx.shadowBlur = 0; ctx.globalAlpha = 1;
+    // ── discharge arcs from the plasma to the coils
+    if (!reduce && Math.random() < .08 + level * .5) spawnDischarge();
+    ctx.save(); ctx.globalCompositeOperation = 'lighter'; ctx.lineCap = 'round';
+    discharge = discharge.filter(d => {
+      d.life -= .085;
+      if (d.life <= 0) return false;
+      ctx.globalAlpha = d.life * .9;
+      ctx.strokeStyle = '#ffffff';
+      ctx.shadowBlur = R * .06; ctx.shadowColor = acc2;
+      ctx.lineWidth = Math.max(.8, R * .0035 * d.life);
+      ctx.beginPath();
+      d.pts.forEach(([r, a], i) => {
+        const x = cx + Math.cos(a) * r, y = cy + Math.sin(a) * r;
+        i ? ctx.lineTo(x, y) : ctx.moveTo(x, y);
+      });
+      ctx.stroke();
+      return true;
+    });
+    ctx.restore();
+
+    // ── plasma torus
+    // A torus rather than a filled disc: the bright band sits at ~.17R and
+    // falls off inward, which is both how the real prop reads and what keeps
+    // the readout text on top of it legible.
+    ctx.save(); ctx.globalCompositeOperation = 'lighter';
+    const pr = R * (.185 + level * .022);
+    const pg = ctx.createRadialGradient(cx, cy, R * .02, cx, cy, pr * 1.5);
+    pg.addColorStop(0,   'rgba(120,190,220,.16)');
+    pg.addColorStop(.52, acc2);
+    pg.addColorStop(.72, acc);
+    pg.addColorStop(1,   'rgba(0,0,0,0)');
+    ctx.globalAlpha = .5 + level * .45;
+    ctx.fillStyle = pg;
+    ctx.beginPath(); ctx.arc(cx, cy, pr * 1.5, 0, TAU); ctx.fill();
+
+    // swirling hot spots inside the chamber
+    for (let i = 0; i < 3; i++){
+      const a = t * (.6 + i * .35) + i * 2.1;
+      const rr = R * (.11 + .035 * Math.sin(t * 1.3 + i));
+      const x = cx + Math.cos(a) * rr, y = cy + Math.sin(a) * rr;
+      const sg = ctx.createRadialGradient(x, y, 0, x, y, R * .085);
+      sg.addColorStop(0, 'rgba(255,255,255,.5)');
+      sg.addColorStop(.4, acc2);
+      sg.addColorStop(1, 'rgba(0,0,0,0)');
+      ctx.globalAlpha = .3 + level * .4;
+      ctx.fillStyle = sg;
+      ctx.beginPath(); ctx.arc(x, y, R * .085, 0, TAU); ctx.fill();
+    }
+
+    // containment ring highlight
+    ctx.globalAlpha = .85;
+    ctx.strokeStyle = acc2;
+    ctx.shadowBlur = R * .07; ctx.shadowColor = acc;
+    ctx.lineWidth = Math.max(1.4, R * .009);
+    ctx.beginPath(); ctx.arc(cx, cy, R * .2, 0, TAU); ctx.stroke();
+    ctx.restore();
+
+    // ── specular sweep
+    // A moving highlight raked across the housing, rather than light rays out
+    // of the core: this is a machined metal object, and what sells that is a
+    // light source travelling over the surface, not a starburst.
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    ring(ctx, R * .565, R * .972); ctx.clip();
+    const sweepA = t * .35;
+    const sx = cx + Math.cos(sweepA) * R, sy = cy + Math.sin(sweepA) * R;
+    const sg2 = ctx.createRadialGradient(sx, sy, 0, sx, sy, R * 1.15);
+    sg2.addColorStop(0,   'rgba(210,235,255,.15)');
+    sg2.addColorStop(.28, 'rgba(160,200,230,.05)');
+    sg2.addColorStop(1,   'rgba(0,0,0,0)');
+    ctx.globalAlpha = .85;
+    ctx.fillStyle = sg2;
+    ctx.fillRect(cx - R, cy - R, R * 2, R * 2);
+    ctx.restore();
+
+    // inner lip shadow, so the housing reads as a deep bezel rather than a decal
+    ctx.save();
+    const lip = ctx.createRadialGradient(cx, cy, R * .565, cx, cy, R * .70);
+    lip.addColorStop(0, 'rgba(0,0,0,.55)');
+    lip.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = lip;
+    ring(ctx, R * .565, R * .70); ctx.fill();
+    ctx.restore();
+
+    // ── orbiting sparks
+    if (!reduce && sparks.length < 26 && Math.random() < .3){
+      sparks.push({ a: Math.random() * TAU, r: R * (.3 + Math.random() * .45),
+                    v: (Math.random() - .5) * .012, life: 1, s: Math.random() });
+    }
+    ctx.save(); ctx.globalCompositeOperation = 'lighter';
+    sparks = sparks.filter(p => {
+      p.a += p.v; p.life -= .006;
+      if (p.life <= 0) return false;
+      ctx.globalAlpha = p.life * .7;
+      ctx.fillStyle = p.s > .5 ? acc2 : acc;
+      const x = cx + Math.cos(p.a) * p.r, y = cy + Math.sin(p.a) * p.r;
+      ctx.beginPath(); ctx.arc(x, y, Math.max(.7, R * .0035 * p.life), 0, TAU); ctx.fill();
+      return true;
+    });
+    ctx.restore();
+
+    // ── outer bloom
+    ctx.save(); ctx.globalCompositeOperation = 'lighter';
+    const bg = ctx.createRadialGradient(cx, cy, R * .1, cx, cy, R * 1.15);
+    bg.addColorStop(0, acc); bg.addColorStop(.35, 'rgba(0,0,0,0)');
+    ctx.globalAlpha = .10 + level * .2;
+    ctx.fillStyle = bg;
+    ctx.beginPath(); ctx.arc(cx, cy, R * 1.15, 0, TAU); ctx.fill();
+    ctx.restore();
   }
 
-  return {
-    start(){ resize(); if (!raf) frame(); },
-  };
+  return { start(){ resize(); if (!raf) draw(); } };
 })();
 
 /* the small live meter inside the Voice button */
@@ -295,7 +620,7 @@ const micMeter = (() => {
     vals[i = (i + 1) % N] = (convo || pttArmed) ? clamp(rmsOf(bus.micAnalyser) * 5, 0, 1) : 0;
     ctx.clearRect(0, 0, w, h);
     const bw = w / N;
-    ctx.fillStyle = getComputedStyle(document.body).getPropertyValue('--acc').trim() || '#37e6d0';
+    ctx.fillStyle = getComputedStyle(ROOT_EL).getPropertyValue('--acc').trim() || '#37e6d0';
     for (let k = 0; k < N; k++){
       const v = vals[(i + 1 + k) % N];
       const bh = Math.max(1, v * h);
@@ -329,6 +654,8 @@ async function transmit(message, options = {}){
   $('#latency').textContent = '';
   $('#response').innerHTML = '<span class="cur"></span>';
   $('#stop').hidden = false;
+  setSubtitle('');
+  revealTranscript();
   log('run','RUN',`${id} · ${message.slice(0,70)}`);
 
   const t0 = performance.now();
@@ -373,6 +700,8 @@ async function transmit(message, options = {}){
   $('#stop').hidden = true;
   clearInterval(tick);
   await speakDone;
+  setSubtitle('');
+  releaseTranscript();
 }
 
 function handleEvent(ev){
@@ -427,6 +756,7 @@ function renderAnswer(final){
   const el = $('#response');
   el.innerHTML = esc(answer) + (final ? '' : '<span class="cur"></span>');
   el.scrollTop = el.scrollHeight;
+  setSubtitle(lastSentence(answer));
 }
 
 /* ══════════════ 6. voice out ══════════════ */
@@ -832,7 +1162,8 @@ document.addEventListener('keydown', e => {
   if (e.key === 'Escape'){
     if (!$('#lightbox').hidden){ $('#lightbox').hidden = true; return; }
     if (running) return cancelRun();
-    if (convo) stopConvo();
+    if (convo) return stopConvo();
+    if (DRAWERS.some(drawerOpen)) closeAllDrawers();
   }
 });
 
@@ -1367,6 +1698,87 @@ async function shipPTT(){
   }
 }
 
+/* ══════════════ 10d. drawers ══════════════
+   Nothing but the reactor is on screen by default. The three drawers live
+   off-canvas behind edge handles; opening one only adds a body class, so the
+   CSS owns all the motion and there's no layout thrash. */
+
+const DRAWERS = ['left', 'right', 'bottom'];
+let bottomPinned = false;
+
+function drawerOpen(side){ return ROOT_EL.classList.contains('open-' + side); }
+
+function setDrawer(side, open){
+  ROOT_EL.classList.toggle('open-' + side, open);
+  const el = $('#drawer' + side[0].toUpperCase() + side.slice(1));
+  if (!el) return;
+  if (open){
+    el.hidden = false;
+  } else {
+    // keep it in the DOM until the slide-out finishes, or it vanishes instantly
+    setTimeout(() => { if (!drawerOpen(side)) el.hidden = true; }, 340);
+  }
+  // Deliberately no autofocus: focusing the composer would make the number
+  // shortcuts type into it instead of switching drawers.
+}
+
+function toggleDrawer(side){ setDrawer(side, !drawerOpen(side)); }
+function closeAllDrawers(){ DRAWERS.forEach(s => setDrawer(s, false)); }
+
+$('#hLeft').onclick   = () => toggleDrawer('left');
+$('#hRight').onclick  = () => toggleDrawer('right');
+$('#hBottom').onclick = () => toggleDrawer('bottom');
+$$('[data-close]').forEach(b => { b.onclick = () => setDrawer(b.dataset.close, false); });
+
+$('#pinBottom').onclick = e => {
+  bottomPinned = !bottomPinned;
+  e.currentTarget.classList.toggle('on', bottomPinned);
+};
+
+// The reactor is the whole interface — clicking it starts and stops voice.
+$('#reactorWrap').onclick = () => { if (!dormantOn) micToggle(); };
+
+document.addEventListener('keydown', e => {
+  const typing = /^(INPUT|TEXTAREA)$/.test(document.activeElement?.tagName || '');
+  if (typing || e.metaKey || e.ctrlKey || e.altKey) return;
+  if (e.key === '1'){ e.preventDefault(); toggleDrawer('left'); }
+  if (e.key === '2'){ e.preventDefault(); toggleDrawer('right'); }
+  if (e.key === '3'){ e.preventDefault(); toggleDrawer('bottom'); }
+});
+
+/* The transcript drawer reveals itself while SuperMaks is answering, then
+   gets out of the way again — unless it's pinned, or you opened it yourself. */
+let autoOpenedBottom = false, bottomHideTimer = null;
+
+function revealTranscript(){
+  if (bottomPinned || drawerOpen('bottom')) return;
+  autoOpenedBottom = true;
+  setDrawer('bottom', true);
+}
+function releaseTranscript(){
+  clearTimeout(bottomHideTimer);
+  if (!autoOpenedBottom || bottomPinned) return;
+  bottomHideTimer = setTimeout(() => {
+    if (autoOpenedBottom && !bottomPinned && !running){
+      setDrawer('bottom', false);
+      autoOpenedBottom = false;
+    }
+  }, 6000);
+}
+
+/* One line of what's being said, under the reactor. The full text lives in
+   the transcript drawer; this is just enough to follow along at a glance. */
+function setSubtitle(text){
+  const el = $('#subtitle');
+  const line = String(text || '').trim();
+  el.textContent = line;
+  el.classList.toggle('on', !!line);
+}
+function lastSentence(text){
+  const parts = String(text || '').trim().split(/(?<=[.!?…])\s+/).filter(Boolean);
+  return parts.length ? parts[parts.length - 1] : '';
+}
+
 /* ══════════════ 11. boot ══════════════ */
 
 const BOOT_LINES = [
@@ -1410,7 +1822,7 @@ function bootSequence(){
   }
   await boot;
 
-  document.body.classList.remove('state-boot');
+  ROOT_EL.classList.remove('state-boot');
 
   lastActivity = Date.now();       // boot itself starts the idle clock fresh
   enterDormant();                  // dormant on every launch — see enterDormant() for the fallback

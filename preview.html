@@ -1,20 +1,21 @@
 <meta charset="utf-8">
 <title>SuperMaks Mission Control</title>
 <style>
+body{background:#04060b;margin:0}
 #smRoot{position:fixed;inset:0;overflow:hidden}
 /* ════════════════════════════════════════════════════════════
    SUPERMAKS · mission control
-   No webfonts, no libraries. The whole thing has to work on a
-   machine bound to 127.0.0.1 with the network unplugged.
+
+   One thing on screen: the reactor. Everything else lives in a
+   drawer behind an edge handle. No webfonts, no libraries — the
+   whole thing has to work on a machine bound to 127.0.0.1 with
+   the network unplugged.
    ════════════════════════════════════════════════════════════ */
 
 :root{
   --bg:        #04060b;
-  --bg-2:      #070b13;
-  --panel:     rgba(14,20,32,.62);
-  --panel-2:   rgba(20,28,44,.5);
-  --line:      rgba(120,190,220,.13);
-  --line-2:    rgba(120,190,220,.28);
+  --panel:     rgba(9,13,20,.88);
+  --line:      rgba(120,190,220,.14);
 
   --ink:       #d6e4f0;
   --ink-dim:   #8ea0b8;
@@ -27,20 +28,19 @@
   --red:   #ff5d70;
   --green: #4de08a;
 
-  /* The live accent. Every state class below re-points these, and the whole
-     interface — rings, glows, borders, the reactor — follows from them. */
-  --acc:     var(--aqua);
-  --acc-2:   var(--azure);
+  /* The live accent. Each state class re-points these and the whole
+     interface — handles, rings, glow, the reactor — follows. */
+  --acc:      var(--aqua);
+  --acc-2:    var(--azure);
   --acc-soft: rgba(55,230,208,.16);
   --acc-line: rgba(55,230,208,.42);
 
-  --r: 14px;
   --mono: ui-monospace,"SF Mono","Cascadia Mono","JetBrains Mono",Menlo,Consolas,monospace;
   --sans: ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",sans-serif;
   --ease: cubic-bezier(.22,.68,.36,1);
+  --bar-h: 46px;
 }
 
-/* state → accent. Nothing else needs to know what mode we're in. */
 #smRoot.state-listening { --acc:var(--aqua);  --acc-2:#7ef4ff; --acc-soft:rgba(55,230,208,.2);  --acc-line:rgba(55,230,208,.55); }
 #smRoot.state-thinking  { --acc:var(--amber); --acc-2:#ffd79a; --acc-soft:rgba(255,177,77,.16); --acc-line:rgba(255,177,77,.5); }
 #smRoot.state-speaking  { --acc:var(--viole); --acc-2:#d6bcff; --acc-soft:rgba(171,123,255,.16);--acc-line:rgba(171,123,255,.5); }
@@ -49,14 +49,12 @@
 
 *{ box-sizing:border-box; margin:0; padding:0; }
 
-/* Several overlays below (#lightbox, #palette, #songBanner) set an
-   unconditional `display` on their own id selector so they lay themselves
-   out correctly the instant JS clears `hidden`. But an id selector beats the
-   browser's built-in `[hidden]{display:none}` rule on specificity, which
-   makes the `hidden` attribute a no-op for exactly those elements: they stay
-   laid out, catching every click through their full-viewport backdrop, even
-   while "hidden". This is the standard fix — !important is deliberate here,
-   it's the one place a hidden element must never lose to any other rule. */
+/* Overlays below set an unconditional `display` on their own id selector so
+   they lay out correctly the instant JS clears `hidden`. An id selector beats
+   the browser's built-in `[hidden]{display:none}` on specificity, which would
+   make the attribute a no-op and leave a full-viewport backdrop swallowing
+   every click while "hidden". !important is deliberate: a hidden element must
+   never lose to any other rule. */
 [hidden]{ display:none !important; }
 
 html,#smRoot{ height:100%; }
@@ -65,345 +63,277 @@ html,#smRoot{ height:100%; }
   color:var(--ink);
   font:400 14px/1.5 var(--sans);
   overflow:hidden;
-  letter-spacing:.005em;
   -webkit-font-smoothing:antialiased;
 }
-
 ::selection{ background:var(--acc-line); color:#02060a; }
 
-/* ── ambient layers ─────────────────────────────────────── */
-.fx-grid,.fx-glow,.fx-scan,.fx-vignette,.fx-noise{
-  position:fixed; inset:0; pointer-events:none; z-index:0;
-}
+button{ font-family:inherit; }
+:focus-visible{ outline:2px solid var(--acc); outline-offset:2px; }
+
+/* ── ambient ────────────────────────────────────────────── */
+.fx-grid,.fx-vignette,.fx-noise{ position:fixed; inset:0; pointer-events:none; z-index:0; }
 .fx-grid{
   background:
-    linear-gradient(rgba(120,190,220,.045) 1px, transparent 1px) 0 0/100% 44px,
-    linear-gradient(90deg, rgba(120,190,220,.045) 1px, transparent 1px) 0 0/44px 100%;
-  mask-image:radial-gradient(120% 100% at 50% 0%, #000 20%, transparent 80%);
+    linear-gradient(rgba(120,190,220,.04) 1px, transparent 1px) 0 0/100% 52px,
+    linear-gradient(90deg, rgba(120,190,220,.04) 1px, transparent 1px) 0 0/52px 100%;
+  mask-image:radial-gradient(120% 90% at 50% 50%, #000 10%, transparent 75%);
 }
-.fx-glow{ filter:blur(90px); opacity:.5; transition:background .9s var(--ease); }
-.fx-glow.g1{
-  width:52vw; height:52vw; left:-14vw; top:-16vw; border-radius:50%;
-  background:radial-gradient(circle, color-mix(in srgb, var(--acc) 40%, transparent), transparent 68%);
-}
-.fx-glow.g2{
-  width:46vw; height:46vw; right:-12vw; bottom:-18vw; left:auto; top:auto; border-radius:50%;
-  background:radial-gradient(circle, color-mix(in srgb, var(--acc-2) 32%, transparent), transparent 68%);
-}
-.fx-scan{
-  background:repeating-linear-gradient(to bottom, rgba(255,255,255,.028) 0 1px, transparent 1px 3px);
-  opacity:.5; mix-blend-mode:overlay;
-}
-.fx-vignette{ background:radial-gradient(130% 105% at 50% 40%, transparent 45%, #000 100%); opacity:.85; }
+.fx-vignette{ background:radial-gradient(125% 100% at 50% 50%, transparent 40%, #000 100%); opacity:.9; }
 .fx-noise{
-  opacity:.035; mix-blend-mode:overlay;
+  opacity:.03; mix-blend-mode:overlay;
   background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='140' height='140'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='3'/></filter><rect width='140' height='140' filter='url(%23n)'/></svg>");
 }
 
-/* ── top bar ────────────────────────────────────────────── */
+/* ── slim top bar ───────────────────────────────────────── */
 #bar{
-  position:relative; z-index:3;
-  height:66px; padding:0 20px;
-  display:flex; align-items:center; gap:22px;
-  border-bottom:1px solid var(--line);
-  background:linear-gradient(180deg, rgba(8,13,22,.9), rgba(8,13,22,.45));
-  backdrop-filter:blur(14px);
+  position:fixed; inset:0 0 auto 0; z-index:12;
+  height:var(--bar-h); padding:0 14px;
+  display:flex; align-items:center; gap:14px;
+  background:linear-gradient(180deg, rgba(4,6,11,.9), transparent);
+  pointer-events:none;
 }
-.brand{ display:flex; align-items:center; gap:13px; }
-.sigil{ width:36px; height:36px; }
-.sigil svg{ width:100%; height:100%; overflow:visible; }
-.s-ring,.s-arc{ fill:none; stroke:var(--acc); }
-.s-ring{ stroke-width:1; opacity:.35; }
-.s-arc{
-  stroke-width:2; stroke-dasharray:34 48; stroke-linecap:round;
-  transform-origin:50% 50%; animation:spin 5.5s linear infinite;
-}
-.s-core{ fill:var(--acc); filter:drop-shadow(0 0 8px var(--acc)); animation:pulse 2.6s ease-in-out infinite; }
-@keyframes spin{ to{ transform:rotate(360deg); } }
-@keyframes pulse{ 0%,100%{ opacity:.75; r:5 } 50%{ opacity:1; r:6 } }
-
-.wm-over{
-  font:500 9.5px/1 var(--mono); letter-spacing:.22em; text-transform:uppercase;
-  color:var(--ink-faint); margin-bottom:5px;
-}
-.wm-name{
-  font:700 21px/1 var(--mono); letter-spacing:.3em;
-  background:linear-gradient(92deg, var(--acc), var(--acc-2) 70%, var(--ink));
+#bar > *{ pointer-events:auto; }
+.brand-name{
+  font:700 12px/1 var(--mono); letter-spacing:.36em; padding-left:.36em;
+  background:linear-gradient(92deg, var(--acc), var(--acc-2));
   -webkit-background-clip:text; background-clip:text; color:transparent;
 }
-
-.bar-pills{ display:flex; gap:8px; margin-left:auto; flex-wrap:wrap; }
+.bar-pills{ display:flex; gap:6px; margin-left:auto; flex-wrap:wrap; justify-content:flex-end; }
 .pill{
-  display:flex; align-items:center; gap:7px;
-  padding:6px 11px; border-radius:100px;
-  border:1px solid var(--line); background:var(--panel-2);
-  font:500 10.5px/1 var(--mono); letter-spacing:.06em;
+  display:flex; align-items:center; gap:6px; padding:4px 9px; border-radius:100px;
+  border:1px solid var(--line); background:rgba(9,13,20,.5);
+  font:500 9.5px/1 var(--mono); letter-spacing:.05em; color:var(--ink-dim);
+  opacity:.55; transition:opacity .2s var(--ease);
 }
-.pill i{
-  width:6px; height:6px; border-radius:50%;
-  background:var(--ink-faint); box-shadow:0 0 0 3px rgba(255,255,255,.03);
-}
-.pill.ok    i{ background:var(--green); box-shadow:0 0 8px var(--green); }
-.pill.warn  i{ background:var(--amber); box-shadow:0 0 8px var(--amber); }
-.pill.bad   i{ background:var(--red);   box-shadow:0 0 8px var(--red); }
-.pill span{ color:var(--ink-faint); text-transform:uppercase; }
-.pill b{ color:var(--ink); font-weight:600; }
-
-.bar-right{ display:flex; align-items:center; gap:12px; }
-.clock{ font:500 12px/1 var(--mono); color:var(--ink-dim); letter-spacing:.1em; min-width:74px; text-align:right; }
-
+#bar:hover .pill{ opacity:1; }
+.pill i{ width:5px; height:5px; border-radius:50%; background:var(--ink-faint); flex:0 0 auto; }
+.pill.ok   i{ background:var(--green); box-shadow:0 0 7px var(--green); }
+.pill.warn i{ background:var(--amber); box-shadow:0 0 7px var(--amber); }
+.pill.bad  i{ background:var(--red);   box-shadow:0 0 7px var(--red); }
+.pill b{ color:var(--ink); font-weight:600; white-space:nowrap; }
+.bar-right{ display:flex; align-items:center; gap:10px; }
+.clock{ font:500 11px/1 var(--mono); color:var(--ink-faint); letter-spacing:.08em; }
 .ghostbtn{
-  font:500 10.5px/1 var(--mono); color:var(--ink-dim);
-  padding:7px 10px; border-radius:8px; cursor:pointer;
-  border:1px solid var(--line); background:transparent;
-  transition:.18s var(--ease);
+  font:500 10px/1 var(--mono); color:var(--ink-faint); cursor:pointer;
+  padding:6px 9px; border-radius:7px; border:1px solid var(--line); background:transparent;
+  transition:.16s var(--ease);
 }
 .ghostbtn:hover{ color:var(--acc); border-color:var(--acc-line); background:var(--acc-soft); }
-.ghostbtn.sm{ padding:4px 8px; }
 
-/* ── layout ─────────────────────────────────────────────── */
-#hud{
-  position:relative; z-index:2;
-  height:calc(100% - 66px);
-  display:grid; grid-template-columns:320px minmax(0,1fr) 340px;
-  gap:14px; padding:14px;
+/* ── the stage ──────────────────────────────────────────── */
+#stage{
+  position:fixed; inset:0; z-index:2;
+  display:flex; flex-direction:column; align-items:center; justify-content:center;
+  gap:min(3vh,26px); padding:calc(var(--bar-h) + 2vh) 4vw 8vh;
+  pointer-events:none;
+  transition:transform .34s var(--ease);
 }
-.col{ display:flex; flex-direction:column; gap:14px; min-height:0; }
+/* The transcript is an overlay, so lift and shrink the stage while it's open —
+   otherwise it crops the bottom of the reactor on shorter screens. */
+#smRoot.open-bottom #stage{ transform:translateY(-15%) scale(.86); }
+@media (max-height:760px){ #smRoot.open-bottom #stage{ transform:translateY(-21%) scale(.70); } }
+.reactor-wrap{
+  position:relative; pointer-events:auto; cursor:pointer;
+  /* The reactor is the interface — let it take the room it needs, but never
+     more than the shorter viewport axis, so nothing ever clips. */
+  width:min(74vh, 74vw, 820px);
+  aspect-ratio:1;
+  display:grid; place-items:center;
+  transition:transform .5s var(--ease);
+}
+.reactor-wrap:hover{ transform:scale(1.012); }
+#core{ position:absolute; inset:0; width:100%; height:100%; display:block; }
+.reactor-readout{ position:relative; text-align:center; pointer-events:none; z-index:2; }
+.r-state{
+  font:700 clamp(15px,2.1vw,26px)/1 var(--mono); letter-spacing:.22em; padding-left:.22em;
+  color:#eaf6ff; text-shadow:0 0 30px var(--acc), 0 0 70px var(--acc);
+}
+.r-sub{
+  margin-top:9px; font:400 clamp(8.5px,1vw,11px)/1 var(--mono);
+  letter-spacing:.16em; color:var(--ink-dim); text-transform:uppercase;
+  min-height:11px;
+}
+#subtitle{
+  pointer-events:none; max-width:min(760px,86vw); text-align:center;
+  font:400 clamp(13px,1.5vw,17px)/1.55 var(--sans); color:var(--ink);
+  text-shadow:0 2px 20px #000; min-height:1.55em;
+  opacity:0; transform:translateY(6px); transition:.4s var(--ease);
+}
+#subtitle.on{ opacity:1; transform:none; }
 
-.panel{
-  border:1px solid var(--line); border-radius:var(--r);
-  background:var(--panel); backdrop-filter:blur(18px);
-  padding:14px; min-height:0;
-  box-shadow:0 18px 50px -30px #000, inset 0 1px 0 rgba(255,255,255,.04);
-  display:flex; flex-direction:column;
-  position:relative; overflow:hidden;
+/* ── edge handles ───────────────────────────────────────── */
+.handle{
+  position:fixed; z-index:14; cursor:pointer;
+  border:0; background:transparent; padding:0;
+  display:flex; align-items:center; justify-content:center;
+  color:var(--ink-faint); font:600 8.5px/1 var(--mono); letter-spacing:.2em;
+  transition:.22s var(--ease);
 }
-/* the hairline that makes a panel feel machined rather than drawn */
-.panel::before{
-  content:""; position:absolute; inset:0 auto auto 0; height:1px; width:100%;
-  background:linear-gradient(90deg, transparent, var(--acc-line), transparent);
-  opacity:.5;
+.handle span{
+  display:block; padding:12px 7px; border-radius:8px;
+  background:rgba(9,13,20,.72); border:1px solid var(--line);
+  backdrop-filter:blur(10px); white-space:nowrap;
 }
-.panel.grow{ flex:1; }
+.handle:hover{ color:var(--acc); }
+.handle:hover span{ border-color:var(--acc-line); background:var(--acc-soft); box-shadow:0 0 22px -8px var(--acc); }
+.h-left,.h-right{ top:50%; }
+.h-left span,.h-right span{ writing-mode:vertical-rl; }
+.h-left{  left:0;  transform:translateY(-50%) translateX(-42%); }
+.h-right{ right:0; transform:translateY(-50%) translateX(42%); }
+.h-left:hover{  transform:translateY(-50%) translateX(0); }
+.h-right:hover{ transform:translateY(-50%) translateX(0); }
+.h-right span{ rotate:180deg; }
+.h-bottom{ left:50%; bottom:0; transform:translateX(-50%) translateY(46%); }
+.h-bottom:hover{ transform:translateX(-50%) translateY(0); }
+#smRoot.open-left  .h-left,
+#smRoot.open-right .h-right,
+#smRoot.open-bottom .h-bottom{ opacity:0; pointer-events:none; }
 
-.ph{ display:flex; align-items:center; gap:10px; margin-bottom:12px; flex:0 0 auto; }
-.ph h2{
-  font:600 10.5px/1 var(--mono); letter-spacing:.19em; text-transform:uppercase;
-  color:var(--acc);
+/* ── drawers ────────────────────────────────────────────── */
+.drawer{
+  position:fixed; z-index:20;
+  background:var(--panel); backdrop-filter:blur(20px);
+  transition:transform .34s var(--ease), opacity .34s var(--ease);
+  display:flex;
 }
-.ph-sub{ font:400 10px/1 var(--mono); color:var(--ink-faint); letter-spacing:.05em; }
-.ph-spacer{ flex:1; }
+.drawer-in{
+  display:flex; flex-direction:column; gap:14px;
+  width:100%; height:100%; padding:14px;
+  overflow-y:auto; overflow-x:hidden;         /* every drawer scrolls its own content */
+  overscroll-behavior:contain;
+}
+.drawer.left, .drawer.right{ top:0; bottom:0; width:min(330px,86vw); }
+.drawer.left{  left:0;  border-right:1px solid var(--line); transform:translateX(-101%); }
+.drawer.right{ right:0; border-left:1px solid var(--line);  transform:translateX(101%); }
+.drawer.bottom{
+  left:50%; bottom:0; width:min(880px,94vw); max-height:min(56vh,520px);
+  border:1px solid var(--line); border-bottom:0;
+  border-radius:16px 16px 0 0;
+  transform:translateX(-50%) translateY(101%);
+}
+#smRoot.open-left   .drawer.left{   transform:none; }
+#smRoot.open-right  .drawer.right{  transform:none; }
+#smRoot.open-bottom .drawer.bottom{ transform:translateX(-50%); }
 
-/* ── command matrix ─────────────────────────────────────── */
-.cmds{ display:grid; grid-template-columns:1fr 1fr; gap:7px; overflow:auto; }
+.dh{ display:flex; align-items:center; gap:9px; flex:0 0 auto; }
+.dh h2{
+  font:600 10px/1 var(--mono); letter-spacing:.2em; text-transform:uppercase; color:var(--acc);
+}
+.dh-spacer{ flex:1; }
+.dh-sub{ font:400 9.5px/1 var(--mono); color:var(--ink-faint); }
+.dclose,.pin,.mini{
+  cursor:pointer; border:1px solid var(--line); background:transparent; color:var(--ink-faint);
+  border-radius:6px; padding:4px 7px; font:600 9px/1 var(--mono); letter-spacing:.08em;
+  transition:.15s var(--ease);
+}
+.dclose{ margin-left:auto; }
+.dh .dclose{ margin-left:0; }
+.dclose:hover,.pin:hover,.mini:hover{ color:var(--acc); border-color:var(--acc-line); background:var(--acc-soft); }
+.pin.on{ color:var(--acc); border-color:var(--acc-line); background:var(--acc-soft); }
+
+.block{ display:flex; flex-direction:column; gap:9px; flex:0 0 auto; }
+.block.grow{ flex:1 1 auto; min-height:150px; }
+.blabel{
+  display:flex; align-items:center; gap:8px;
+  font:600 9px/1 var(--mono); letter-spacing:.18em; text-transform:uppercase; color:var(--ink-faint);
+}
+.blabel em{ font-style:normal; color:var(--ink-dim); letter-spacing:.05em; }
+.blabel .mini,.blabel .filters{ margin-left:auto; }
+
+/* command matrix */
+.cmds{ display:grid; grid-template-columns:1fr 1fr; gap:6px; flex:0 0 auto; }
 .cmd{
-  text-align:left; cursor:pointer; padding:9px 10px; border-radius:10px;
-  border:1px solid var(--line); background:rgba(255,255,255,.014);
-  color:var(--ink); transition:.16s var(--ease); position:relative; overflow:hidden;
+  text-align:left; cursor:pointer; padding:8px 9px; border-radius:9px;
+  border:1px solid var(--line); background:rgba(255,255,255,.015);
+  color:var(--ink); transition:.15s var(--ease); position:relative; overflow:hidden;
 }
-.cmd b{ display:block; font:600 11.5px/1.2 var(--mono); color:var(--acc); letter-spacing:.03em; }
-.cmd span{ display:block; margin-top:4px; font-size:10.5px; color:var(--ink-faint); }
-.cmd:hover{ border-color:var(--acc-line); background:var(--acc-soft); transform:translateY(-1px); }
-.cmd.armed{
-  border-color:var(--acc); background:var(--acc-soft);
-  box-shadow:0 0 0 1px var(--acc-line), 0 0 22px -6px var(--acc);
-}
+.cmd b{ display:block; font:600 11px/1.2 var(--mono); color:var(--acc); }
+.cmd span{ display:block; margin-top:3px; font-size:10px; color:var(--ink-faint); }
+.cmd:hover{ border-color:var(--acc-line); background:var(--acc-soft); }
+.cmd.armed{ border-color:var(--acc); background:var(--acc-soft); box-shadow:0 0 20px -8px var(--acc); }
 .cmd.armed::after{
-  content:"ARMED"; position:absolute; top:7px; right:8px;
-  font:600 7.5px/1 var(--mono); letter-spacing:.14em; color:var(--acc);
+  content:"ARMED"; position:absolute; top:6px; right:7px;
+  font:600 7px/1 var(--mono); letter-spacing:.14em; color:var(--acc);
 }
 
-/* ── chips ──────────────────────────────────────────────── */
-.chips{ display:flex; flex-wrap:wrap; gap:5px; max-height:104px; overflow:auto; }
+.chips{ display:flex; flex-wrap:wrap; gap:4px; }
 .chip{
-  font:500 10px/1 var(--mono); padding:5px 8px; border-radius:6px;
+  font:500 9.5px/1 var(--mono); padding:5px 7px; border-radius:6px;
   border:1px solid var(--line); background:rgba(255,255,255,.02); color:var(--ink-dim);
-  white-space:nowrap; max-width:100%; overflow:hidden; text-overflow:ellipsis;
+  max-width:100%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
 }
 .chip.ghost{ color:var(--ink-faint); border-style:dashed; }
 
-/* ── composer ───────────────────────────────────────────── */
-.composer{ display:flex; flex-direction:column; gap:8px; }
 #input{
-  width:100%; resize:none; border-radius:10px; padding:11px 12px;
-  border:1px solid var(--line); background:rgba(0,0,0,.35);
-  color:var(--ink); font:400 13px/1.55 var(--sans); outline:none;
-  transition:.18s var(--ease);
+  width:100%; resize:vertical; min-height:64px; border-radius:9px; padding:10px 11px;
+  border:1px solid var(--line); background:rgba(0,0,0,.4);
+  color:var(--ink); font:400 13px/1.5 var(--sans); outline:none; transition:.16s var(--ease);
 }
 #input::placeholder{ color:var(--ink-faint); }
-#input:focus{ border-color:var(--acc-line); box-shadow:0 0 0 3px var(--acc-soft); background:rgba(0,0,0,.5); }
-.composer-foot{ display:flex; align-items:center; gap:10px; }
-.hint{ font-size:10.5px; color:var(--ink-faint); flex:1; }
-.hint b{ color:var(--acc); font-weight:600; }
-.keyhint{
-  font:500 9.5px/1 var(--mono); color:var(--ink-faint);
-  border:1px solid var(--line); border-radius:5px; padding:4px 6px;
-}
+#input:focus{ border-color:var(--acc-line); box-shadow:0 0 0 3px var(--acc-soft); }
+.keyrow{ display:flex; gap:12px; font:400 9px/1 var(--mono); color:var(--ink-faint); letter-spacing:.06em; }
 
-/* ── reactor ────────────────────────────────────────────── */
-.reactor{
-  position:relative; flex:0 0 auto;
-  height:clamp(230px, 34vh, 340px);
-  display:grid; place-items:center;
-}
-#core{ width:100%; height:100%; display:block; }
-.reactor-hud{ position:absolute; text-align:center; pointer-events:none; }
-.r-label{ font:600 8.5px/1 var(--mono); letter-spacing:.34em; color:var(--ink-faint); }
-.r-state{
-  margin:9px 0 6px; font:700 26px/1 var(--mono); letter-spacing:.16em; color:var(--acc);
-  text-shadow:0 0 26px color-mix(in srgb, var(--acc) 60%, transparent);
-}
-.r-sub{ font:400 10.5px/1 var(--mono); color:var(--ink-dim); letter-spacing:.06em; min-height:12px; }
-
-.reactor-corners i{
-  position:absolute; width:16px; height:16px; border:1px solid var(--acc-line); opacity:.5;
-}
-.reactor-corners i:nth-child(1){ top:6px;  left:6px;  border-right:0; border-bottom:0; }
-.reactor-corners i:nth-child(2){ top:6px;  right:6px; border-left:0;  border-bottom:0; }
-.reactor-corners i:nth-child(3){ bottom:6px;left:6px;  border-right:0; border-top:0; }
-.reactor-corners i:nth-child(4){ bottom:6px;right:6px; border-left:0;  border-top:0; }
-
-/* ── response ───────────────────────────────────────────── */
-.response{ flex:1; min-height:0; }
-.rtag{
-  font:600 9px/1 var(--mono); letter-spacing:.16em; text-transform:uppercase;
-  padding:4px 8px; border-radius:5px;
-  border:1px solid var(--line); color:var(--ink-faint);
-}
-.rtag.live{ color:var(--acc); border-color:var(--acc-line); background:var(--acc-soft); }
-.rtag.done{ color:var(--green); border-color:rgba(77,224,138,.4); }
-.rtag.err{ color:var(--red);   border-color:rgba(255,93,112,.4); }
-
-.r#smRoot{
-  flex:1; min-height:0; overflow:auto;
-  font:400 15px/1.68 var(--sans); color:var(--ink);
-  white-space:pre-wrap; word-break:break-word;
-  padding-right:6px;
-}
-.rbody .placeholder{ color:var(--ink-faint); font-style:italic; }
-.rbody .fault{ color:var(--red); }
-.cur{
-  display:inline-block; width:8px; height:1.05em; vertical-align:-2px;
-  margin-left:2px; background:var(--acc); box-shadow:0 0 12px var(--acc);
-  animation:blink 1s steps(2,end) infinite;
-}
-@keyframes blink{ 50%{ opacity:0 } }
-
-/* ── transport ──────────────────────────────────────────── */
-.transport{ display:flex; gap:9px; flex:0 0 auto; }
-.tbtn{
-  position:relative; overflow:hidden; cursor:pointer;
-  display:flex; align-items:center; justify-content:center; gap:8px;
-  padding:13px 16px; border-radius:11px;
-  border:1px solid var(--line); background:var(--panel);
-  color:var(--ink); font:600 11.5px/1 var(--mono); letter-spacing:.12em; text-transform:uppercase;
-  transition:.18s var(--ease); backdrop-filter:blur(12px);
-}
-.tbtn:hover{ border-color:var(--acc-line); background:var(--acc-soft); }
-.tbtn.primary{
-  flex:1; color:#02090c;
-  background:linear-gradient(100deg, var(--acc), var(--acc-2));
-  border-color:transparent; box-shadow:0 12px 34px -16px var(--acc);
-}
-.tbtn.primary:hover{ filter:brightness(1.1); transform:translateY(-1px); }
-.tbtn.danger{ color:var(--red); border-color:rgba(255,93,112,.45); }
-.tbtn.icon{ padding:13px; font-size:14px; letter-spacing:0; }
-.tbtn.mic{ min-width:132px; }
-.tdot{
-  width:8px; height:8px; border-radius:50%;
-  background:var(--ink-faint); transition:.2s var(--ease);
-}
-.tbtn.mic.on{ border-color:var(--acc); background:var(--acc-soft); color:var(--acc); }
-.tbtn.mic.on .tdot{ background:var(--acc); box-shadow:0 0 12px var(--acc); animation:pulse 1.4s ease-in-out infinite; }
-.tmeter{
-  position:absolute; inset:auto 0 0 0; width:100%; height:16px; opacity:0;
-  transition:opacity .25s var(--ease);
-}
-.tbtn.mic.on .tmeter{ opacity:.85; }
-.tbtn.off{ opacity:.5; }
-
-/* ── telemetry ──────────────────────────────────────────── */
-.tele{ display:flex; flex-direction:column; gap:1px; }
+/* telemetry */
+.tele{ display:flex; flex-direction:column; flex:0 0 auto; }
 .trow{
   display:flex; align-items:center; justify-content:space-between; gap:10px;
-  padding:7px 0; border-bottom:1px dashed rgba(120,190,220,.09);
-  font:400 11px/1 var(--mono);
+  padding:6px 0; border-bottom:1px dashed rgba(120,190,220,.08);
+  font:400 10.5px/1 var(--mono);
 }
 .trow:last-child{ border-bottom:0; }
-.trow span{ color:var(--ink-faint); letter-spacing:.05em; }
-.trow b{
-  color:var(--ink); font-weight:600; max-width:62%;
-  overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
-}
+.trow span{ color:var(--ink-faint); }
+.trow b{ color:var(--ink); font-weight:600; max-width:62%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .trow b.ok{ color:var(--green); } .trow b.warn{ color:var(--amber); } .trow b.bad{ color:var(--red); }
 
-/* ── mac panel ──────────────────────────────────────────── */
-.macline{ display:flex; align-items:center; gap:8px; margin-bottom:10px; font:500 11px/1 var(--mono); }
-.dot{ width:7px; height:7px; border-radius:50%; background:var(--ink-faint); flex:0 0 auto; }
-.dot.ok{ background:var(--green); box-shadow:0 0 10px var(--green); }
-.dot.bad{ background:var(--red);  box-shadow:0 0 10px var(--red); }
-.macdetail{ color:var(--ink-faint); font-size:10px; margin-left:auto; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-
+/* mac */
+.macline{ display:flex; align-items:center; gap:7px; font:500 10.5px/1 var(--mono); }
+.dot{ width:6px; height:6px; border-radius:50%; background:var(--ink-faint); flex:0 0 auto; }
+.dot.ok{ background:var(--green); box-shadow:0 0 9px var(--green); }
+.dot.bad{ background:var(--red);  box-shadow:0 0 9px var(--red); }
+.macdetail{ color:var(--ink-faint); font-size:9.5px; margin-left:auto; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .shot{
   position:relative; display:block; width:100%; aspect-ratio:16/10; cursor:pointer;
-  border:1px solid var(--line); border-radius:10px; overflow:hidden;
-  background:#000 center/cover no-repeat; padding:0;
-  transition:.2s var(--ease);
+  border:1px solid var(--line); border-radius:9px; overflow:hidden; background:#000; padding:0;
+  transition:.18s var(--ease);
 }
-.shot:hover{ border-color:var(--acc-line); box-shadow:0 0 26px -12px var(--acc); }
+.shot:hover{ border-color:var(--acc-line); }
 .shot img{ width:100%; height:100%; object-fit:cover; display:none; }
 .shot img.on{ display:block; }
-.shot-empty{
-  position:absolute; inset:0; display:grid; place-items:center;
-  font:400 10px/1 var(--mono); color:var(--ink-faint); letter-spacing:.1em;
-}
+.shot-empty{ position:absolute; inset:0; display:grid; place-items:center; font:400 9.5px/1 var(--mono); color:var(--ink-faint); }
 .shot-scan{
-  position:absolute; inset:0; pointer-events:none;
-  background:linear-gradient(180deg, transparent 40%, color-mix(in srgb, var(--acc) 22%, transparent) 50%, transparent 60%);
-  transform:translateY(-100%); opacity:0;
+  position:absolute; inset:0; pointer-events:none; opacity:0;
+  background:linear-gradient(180deg, transparent 40%, var(--acc-soft) 50%, transparent 60%);
+  transform:translateY(-100%);
 }
 .shot.loading .shot-scan{ opacity:1; animation:sweep 1.1s linear infinite; }
 @keyframes sweep{ to{ transform:translateY(100%); } }
-
-.macstats{ display:grid; grid-template-columns:1fr 1fr; gap:6px 12px; margin:11px 0 10px; }
-.macstats div{ display:flex; justify-content:space-between; gap:8px; font:400 10.5px/1 var(--mono); }
+.macstats{ display:grid; grid-template-columns:1fr 1fr; gap:5px 12px; }
+.macstats div{ display:flex; justify-content:space-between; gap:8px; font:400 10px/1 var(--mono); }
 .macstats span{ color:var(--ink-faint); }
 .macstats b{ color:var(--ink); font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-
 .macacts{ display:grid; grid-template-columns:repeat(3,1fr); gap:5px; }
 .macacts button{
-  cursor:pointer; padding:7px 4px; border-radius:7px;
-  border:1px solid var(--line); background:rgba(255,255,255,.014);
-  color:var(--ink-dim); font:500 9.5px/1 var(--mono); letter-spacing:.03em;
-  transition:.15s var(--ease);
+  cursor:pointer; padding:7px 3px; border-radius:7px;
+  border:1px solid var(--line); background:rgba(255,255,255,.015);
+  color:var(--ink-dim); font:500 9px/1 var(--mono); transition:.15s var(--ease);
 }
 .macacts button:hover{ color:var(--acc); border-color:var(--acc-line); background:var(--acc-soft); }
 .macacts button:disabled{ opacity:.35; cursor:not-allowed; }
 
-/* ── event log ──────────────────────────────────────────── */
-.logpanel{ min-height:0; }
-.filters{ display:flex; gap:3px; }
+/* log */
+.filters{ display:flex; gap:2px; }
 .filters button{
-  cursor:pointer; padding:4px 7px; border-radius:5px; border:1px solid transparent;
+  cursor:pointer; padding:3px 6px; border-radius:5px; border:1px solid transparent;
   background:transparent; color:var(--ink-faint);
-  font:500 9px/1 var(--mono); letter-spacing:.08em; text-transform:uppercase;
-  transition:.15s var(--ease);
+  font:500 8.5px/1 var(--mono); letter-spacing:.06em; text-transform:uppercase; transition:.15s var(--ease);
 }
-.filters button:hover{ color:var(--ink-dim); }
 .filters button.on{ color:var(--acc); border-color:var(--acc-line); background:var(--acc-soft); }
-
-.log{ flex:1; min-height:0; overflow:auto; display:flex; flex-direction:column; gap:5px; padding-right:4px; }
-.entry{
-  border-left:2px solid var(--ink-faint);
-  padding:6px 0 6px 9px; font:400 10.5px/1.45 var(--mono);
-  animation:slidein .22s var(--ease);
-}
-@keyframes slidein{ from{ opacity:0; transform:translateX(-6px) } }
-.entry .top{ display:flex; gap:8px; align-items:baseline; }
-.entry .ts{ color:var(--ink-faint); font-size:9.5px; }
-.entry .kind{ font-weight:700; letter-spacing:.1em; font-size:9px; }
+.log{ flex:1; min-height:0; overflow:auto; display:flex; flex-direction:column; gap:4px; }
+.entry{ border-left:2px solid var(--ink-faint); padding:5px 0 5px 8px; font:400 10px/1.45 var(--mono); }
+.entry .top{ display:flex; gap:7px; align-items:baseline; }
+.entry .ts{ color:var(--ink-faint); font-size:9px; }
+.entry .kind{ font-weight:700; letter-spacing:.1em; font-size:8.5px; }
 .entry .msg{ color:var(--ink-dim); margin-top:2px; word-break:break-word; }
-
 .k-run,.k-status,.k-complete{ border-color:var(--azure); } .k-run .kind,.k-status .kind,.k-complete .kind{ color:var(--azure); }
 .k-voice{ border-color:var(--aqua);  } .k-voice .kind{ color:var(--aqua); }
 .k-mac{   border-color:var(--viole); } .k-mac .kind{ color:var(--viole); }
@@ -411,140 +341,154 @@ html,#smRoot{ height:100%; }
 .k-note,.k-send{ border-color:var(--ink-faint); } .k-note .kind,.k-send .kind{ color:var(--ink-dim); }
 .k-tool{ border-color:var(--amber); } .k-tool .kind{ color:var(--amber); }
 
-/* ── command palette ────────────────────────────────────── */
-#palette{
-  position:fixed; inset:0; z-index:40; display:grid; place-items:start center;
-  padding-top:14vh; background:rgba(2,4,8,.72); backdrop-filter:blur(8px);
-  animation:fade .16s var(--ease);
+/* transcript + transport */
+.rtag{
+  font:600 8.5px/1 var(--mono); letter-spacing:.14em; text-transform:uppercase;
+  padding:4px 7px; border-radius:5px; border:1px solid var(--line); color:var(--ink-faint);
 }
-@keyframes fade{ from{ opacity:0 } }
-.pal-box{
-  width:min(560px,92vw); border-radius:14px; overflow:hidden;
-  border:1px solid var(--acc-line); background:rgba(10,15,24,.96);
-  box-shadow:0 40px 100px -30px #000, 0 0 60px -30px var(--acc);
+.rtag.live{ color:var(--acc); border-color:var(--acc-line); background:var(--acc-soft); }
+.rtag.done{ color:var(--green); border-color:rgba(77,224,138,.4); }
+.rtag.err{ color:var(--red);   border-color:rgba(255,93,112,.4); }
+.r#smRoot{
+  flex:1 1 auto; min-height:80px; overflow:auto;
+  font:400 15px/1.7 var(--sans); color:var(--ink);
+  white-space:pre-wrap; word-break:break-word; padding-right:4px;
 }
-#palInput{
-  width:100%; padding:16px 18px; border:0; outline:0;
-  background:transparent; color:var(--ink); font:400 15px/1 var(--sans);
-  border-bottom:1px solid var(--line);
+.rbody .placeholder{ color:var(--ink-faint); font-style:italic; }
+.rbody .fault{ color:var(--red); }
+.cur{
+  display:inline-block; width:7px; height:1.05em; vertical-align:-2px; margin-left:2px;
+  background:var(--acc); box-shadow:0 0 10px var(--acc); animation:blink 1s steps(2,end) infinite;
 }
-.pal-list{ max-height:46vh; overflow:auto; padding:6px; }
-.pal-item{
-  display:flex; align-items:center; gap:12px; padding:10px 12px;
-  border-radius:9px; cursor:pointer;
+@keyframes blink{ 50%{ opacity:0 } }
+.transport{ display:flex; gap:8px; flex:0 0 auto; flex-wrap:wrap; }
+.tbtn{
+  position:relative; overflow:hidden; cursor:pointer;
+  display:flex; align-items:center; justify-content:center; gap:7px;
+  padding:11px 14px; border-radius:10px; border:1px solid var(--line);
+  background:rgba(255,255,255,.02); color:var(--ink);
+  font:600 10.5px/1 var(--mono); letter-spacing:.11em; text-transform:uppercase;
+  transition:.16s var(--ease);
 }
-.pal-item b{ font:600 12px/1 var(--mono); color:var(--acc); min-width:104px; }
-.pal-item span{ font-size:12px; color:var(--ink-dim); }
-.pal-item.sel{ background:var(--acc-soft); box-shadow:inset 0 0 0 1px var(--acc-line); }
-.pal-foot{
-  display:flex; gap:16px; padding:9px 16px; border-top:1px solid var(--line);
-  font:400 9.5px/1 var(--mono); color:var(--ink-faint); letter-spacing:.08em;
-}
+.tbtn:hover{ border-color:var(--acc-line); background:var(--acc-soft); }
+.tbtn.primary{ flex:1; min-width:130px; color:#02090c; background:linear-gradient(100deg,var(--acc),var(--acc-2)); border-color:transparent; }
+.tbtn.primary:hover{ filter:brightness(1.1); }
+.tbtn.danger{ color:var(--red); border-color:rgba(255,93,112,.45); }
+.tbtn.icon{ padding:11px 13px; font-size:13px; letter-spacing:0; }
+.tbtn.mic{ min-width:118px; }
+.tdot{ width:7px; height:7px; border-radius:50%; background:var(--ink-faint); transition:.2s var(--ease); }
+.tbtn.mic.on{ border-color:var(--acc); background:var(--acc-soft); color:var(--acc); }
+.tbtn.mic.on .tdot{ background:var(--acc); box-shadow:0 0 10px var(--acc); }
+.tmeter{ position:absolute; inset:auto 0 0 0; width:100%; height:14px; opacity:0; transition:opacity .25s var(--ease); }
+.tbtn.mic.on .tmeter{ opacity:.85; }
+.tbtn.off{ opacity:.5; }
 
 /* ── wake-phrase jingle ─────────────────────────────────── */
 #wakeSongHost{ position:fixed; width:1px; height:1px; opacity:0; pointer-events:none; overflow:hidden; }
 #songBanner{
-  position:fixed; z-index:46; top:80px; left:50%; transform:translateX(-50%);
-  display:flex; align-items:center; gap:11px;
-  padding:9px 10px 9px 14px; border-radius:100px;
-  border:1px solid var(--acc-line); background:rgba(10,15,24,.9); backdrop-filter:blur(14px);
+  position:fixed; z-index:26; top:calc(var(--bar-h) + 10px); left:50%; transform:translateX(-50%);
+  display:flex; align-items:center; gap:10px;
+  padding:8px 9px 8px 13px; border-radius:100px;
+  border:1px solid var(--acc-line); background:rgba(10,15,24,.92); backdrop-filter:blur(14px);
   box-shadow:0 18px 44px -20px #000, 0 0 34px -16px var(--acc);
-  animation:approvalIn .22s var(--ease);
+  animation:slideIn .22s var(--ease);
 }
-.song-eq{ display:flex; align-items:flex-end; gap:2px; height:13px; }
-.song-eq i{
-  width:3px; background:var(--acc); border-radius:1px;
-  animation:eqBounce 1s ease-in-out infinite;
-}
+.song-eq{ display:flex; align-items:flex-end; gap:2px; height:12px; }
+.song-eq i{ width:3px; background:var(--acc); border-radius:1px; animation:eqBounce 1s ease-in-out infinite; }
 .song-eq i:nth-child(1){ animation-delay:-.9s; } .song-eq i:nth-child(2){ animation-delay:-.6s; }
-.song-eq i:nth-child(3){ animation-delay:-.3s; } .song-eq i:nth-child(4){ animation-delay:0s; }
-@keyframes eqBounce{ 0%,100%{ height:3px; } 50%{ height:13px; } }
-.song-label{ font:500 11px/1 var(--mono); color:var(--ink); letter-spacing:.02em; white-space:nowrap; }
+.song-eq i:nth-child(3){ animation-delay:-.3s; }
+@keyframes eqBounce{ 0%,100%{ height:3px; } 50%{ height:12px; } }
+.song-label{ font:500 10.5px/1 var(--mono); color:var(--ink); white-space:nowrap; }
 #songBanner button{
-  cursor:pointer; padding:5px 10px; border-radius:100px;
-  border:1px solid var(--line); background:transparent; color:var(--ink-faint);
-  font:600 9.5px/1 var(--mono); letter-spacing:.1em; text-transform:uppercase;
-  transition:.15s var(--ease);
+  cursor:pointer; padding:5px 9px; border-radius:100px; border:1px solid var(--line);
+  background:transparent; color:var(--ink-faint); font:600 9px/1 var(--mono); letter-spacing:.1em;
 }
-#songBanner button:hover{ color:var(--acc); border-color:var(--acc-line); background:var(--acc-soft); }
+#songBanner button:hover{ color:var(--acc); border-color:var(--acc-line); }
 
-/* ── Mac action approvals ───────────────────────────────── */
+/* ── approvals ──────────────────────────────────────────── */
 #approvals{
-  position:fixed; z-index:45; top:80px; right:16px;
-  display:flex; flex-direction:column; gap:10px;
-  width:min(360px, 92vw); pointer-events:none;
+  position:fixed; z-index:28; top:calc(var(--bar-h) + 10px); right:14px;
+  display:flex; flex-direction:column; gap:10px; width:min(340px,90vw); pointer-events:none;
+  transition:right .34s var(--ease);
 }
+/* step aside rather than sit on top of the telemetry drawer */
+#smRoot.open-right #approvals{ right:calc(min(330px,86vw) + 14px); }
+@media (max-width:720px){ #smRoot.open-right #approvals{ right:14px; } }
 .approval{
-  pointer-events:auto;
-  border:1px solid rgba(255,177,77,.5); border-radius:12px;
-  background:rgba(18,14,8,.92); backdrop-filter:blur(16px);
-  padding:13px 14px; box-shadow:0 20px 50px -20px #000, 0 0 40px -18px var(--amber);
-  animation:approvalIn .22s var(--ease);
+  pointer-events:auto; border:1px solid rgba(255,177,77,.5); border-radius:12px;
+  background:rgba(18,14,8,.94); backdrop-filter:blur(16px); padding:12px 13px;
+  box-shadow:0 20px 50px -20px #000, 0 0 40px -18px var(--amber);
+  animation:slideIn .22s var(--ease);
 }
-@keyframes approvalIn{ from{ opacity:0; transform:translateX(14px) scale(.98) } }
-.approval-head{ display:flex; align-items:center; gap:8px; margin-bottom:8px; }
-.approval-head b{
-  font:700 9.5px/1 var(--mono); letter-spacing:.16em; text-transform:uppercase; color:var(--amber);
-}
-.approval-head .tool{
-  margin-left:auto; font:500 9px/1 var(--mono); color:var(--ink-faint);
-  border:1px solid var(--line); border-radius:5px; padding:3px 6px;
-}
-.approval-desc{ font:400 12px/1.4 var(--sans); color:var(--ink); margin-bottom:6px; }
+@keyframes slideIn{ from{ opacity:0; transform:translateX(14px) scale(.98) } }
+.approval-head{ display:flex; align-items:center; gap:8px; margin-bottom:7px; }
+.approval-head b{ font:700 9px/1 var(--mono); letter-spacing:.15em; text-transform:uppercase; color:var(--amber); }
+.approval-head .tool{ margin-left:auto; font:500 8.5px/1 var(--mono); color:var(--ink-faint); border:1px solid var(--line); border-radius:5px; padding:3px 6px; }
+.approval-desc{ font:400 11.5px/1.4 var(--sans); color:var(--ink); margin-bottom:6px; }
 .approval-cmd{
-  font:400 10.5px/1.5 var(--mono); color:var(--ink-dim);
-  background:rgba(0,0,0,.35); border-radius:7px; padding:7px 9px;
-  max-height:80px; overflow:auto; white-space:pre-wrap; word-break:break-word;
-  margin-bottom:10px;
+  font:400 10px/1.5 var(--mono); color:var(--ink-dim); background:rgba(0,0,0,.4);
+  border-radius:7px; padding:7px 8px; max-height:80px; overflow:auto;
+  white-space:pre-wrap; word-break:break-word; margin-bottom:9px;
 }
 .approval-row{ display:flex; gap:8px; }
 .approval-row button{
   flex:1; cursor:pointer; padding:8px; border-radius:8px;
-  font:600 10.5px/1 var(--mono); letter-spacing:.08em; text-transform:uppercase;
+  font:600 10px/1 var(--mono); letter-spacing:.08em; text-transform:uppercase;
   border:1px solid var(--line); background:rgba(255,255,255,.02); color:var(--ink-dim);
-  transition:.15s var(--ease);
 }
 .approval-row .allow{ color:var(--green); border-color:rgba(77,224,138,.4); }
 .approval-row .allow:hover{ background:rgba(77,224,138,.14); }
 .approval-row .deny{ color:var(--red); border-color:rgba(255,93,112,.4); }
 .approval-row .deny:hover{ background:rgba(255,93,112,.14); }
 
+/* ── command palette ────────────────────────────────────── */
+#palette{
+  position:fixed; inset:0; z-index:40; display:grid; place-items:start center;
+  padding-top:14vh; background:rgba(2,4,8,.74); backdrop-filter:blur(8px);
+  animation:fade .16s var(--ease);
+}
+@keyframes fade{ from{ opacity:0 } }
+.pal-box{
+  width:min(560px,92vw); border-radius:14px; overflow:hidden;
+  border:1px solid var(--acc-line); background:rgba(10,15,24,.97);
+  box-shadow:0 40px 100px -30px #000, 0 0 60px -30px var(--acc);
+}
+#palInput{
+  width:100%; padding:15px 17px; border:0; outline:0; background:transparent;
+  color:var(--ink); font:400 15px/1 var(--sans); border-bottom:1px solid var(--line);
+}
+.pal-list{ max-height:46vh; overflow:auto; padding:6px; }
+.pal-item{ display:flex; align-items:center; gap:12px; padding:9px 11px; border-radius:8px; cursor:pointer; }
+.pal-item b{ font:600 11.5px/1 var(--mono); color:var(--acc); min-width:100px; }
+.pal-item span{ font-size:11.5px; color:var(--ink-dim); }
+.pal-item.sel{ background:var(--acc-soft); box-shadow:inset 0 0 0 1px var(--acc-line); }
+.pal-foot{
+  display:flex; gap:15px; padding:8px 15px; border-top:1px solid var(--line);
+  font:400 9px/1 var(--mono); color:var(--ink-faint); letter-spacing:.07em;
+}
+
 /* ── lightbox ───────────────────────────────────────────── */
 #lightbox{
   position:fixed; inset:0; z-index:50; display:grid; place-items:center; padding:36px;
-  background:rgba(2,4,8,.9); backdrop-filter:blur(10px); cursor:zoom-out;
+  background:rgba(2,4,8,.92); backdrop-filter:blur(10px); cursor:zoom-out;
   animation:fade .16s var(--ease);
 }
-#lightbox img{
-  max-width:100%; max-height:100%; border-radius:12px;
-  border:1px solid var(--acc-line); box-shadow:0 40px 120px -40px var(--acc);
-}
+#lightbox img{ max-width:100%; max-height:100%; border-radius:12px; border:1px solid var(--acc-line); }
 
-/* ── dormant: the once-a-day pre-wake state ────────────────
-   Deliberately much quieter than #boot — this is "asleep," not "starting up."
-   No progress bar, no lines, nothing scanning. Just a slow breathing mark and
-   a background continuous-recognition loop listening for the wake phrase. */
+/* ── dormant ────────────────────────────────────────────── */
 #dormant{
   position:fixed; inset:0; z-index:55; display:grid; place-items:center;
-  background:#000; cursor:pointer;
-  transition:opacity .6s var(--ease);
+  background:#000; cursor:pointer; transition:opacity .6s var(--ease);
 }
 #dormant.waking{ opacity:0; pointer-events:none; }
 .dormant-inner{ text-align:center; }
 .dormant-mark{
   width:52px; height:52px; margin:0 auto 22px; border-radius:50%;
-  border:1px solid rgba(55,230,208,.32);
-  box-shadow:0 0 44px -12px rgba(55,230,208,.55);
+  border:1px solid rgba(55,230,208,.32); box-shadow:0 0 44px -12px rgba(55,230,208,.55);
   animation:dormantBreathe 3.4s ease-in-out infinite;
 }
-@keyframes dormantBreathe{
-  0%,100%{ opacity:.3; transform:scale(.92); }
-  50%{ opacity:.85; transform:scale(1); }
-}
-.dormant-caption{
-  font:400 9.5px/1 var(--mono); letter-spacing:.26em; text-transform:uppercase;
-  color:var(--ink-faint);
-}
+@keyframes dormantBreathe{ 0%,100%{ opacity:.3; transform:scale(.92) } 50%{ opacity:.85; transform:scale(1) } }
+.dormant-caption{ font:400 9.5px/1 var(--mono); letter-spacing:.26em; text-transform:uppercase; color:var(--ink-faint); }
 
 /* ── boot ───────────────────────────────────────────────── */
 #boot{
@@ -554,49 +498,36 @@ html,#smRoot{ height:100%; }
 #smRoot:not(.state-boot) #boot{ opacity:0; visibility:hidden; }
 .boot-inner{ width:min(420px,86vw); text-align:center; }
 .boot-mark{
-  width:66px; height:66px; margin:0 auto 20px; border-radius:50%;
-  display:grid; place-items:center;
-  border:1px solid var(--acc-line); color:var(--acc);
-  font:700 26px/1 var(--mono);
+  width:64px; height:64px; margin:0 auto 20px; border-radius:50%; display:grid; place-items:center;
+  border:1px solid var(--acc-line); color:var(--acc); font:700 25px/1 var(--mono);
   box-shadow:0 0 50px -12px var(--acc), inset 0 0 30px -14px var(--acc);
-  animation:pulse 1.6s ease-in-out infinite;
+  animation:dormantBreathe 1.8s ease-in-out infinite;
 }
-.boot-name{
-  font:700 17px/1 var(--mono); letter-spacing:.5em; color:var(--acc);
-  margin-bottom:22px; padding-left:.5em;
-}
-.boot-lines{
-  height:104px; text-align:left; font:400 10.5px/1.7 var(--mono); color:var(--ink-faint);
-}
+.boot-name{ font:700 16px/1 var(--mono); letter-spacing:.5em; color:var(--acc); margin-bottom:20px; padding-left:.5em; }
+.boot-lines{ height:104px; text-align:left; font:400 10.5px/1.7 var(--mono); color:var(--ink-faint); }
 .boot-lines .ok{ color:var(--acc); }
-.boot-bar{ height:2px; background:rgba(120,190,220,.14); border-radius:2px; overflow:hidden; margin-top:16px; }
-.boot-bar i{
-  display:block; height:100%; width:0;
-  background:linear-gradient(90deg,var(--acc),var(--acc-2));
-  box-shadow:0 0 12px var(--acc); transition:width .3s var(--ease);
-}
-.boot-skip{ margin-top:14px; font:400 9px/1 var(--mono); letter-spacing:.2em; color:var(--ink-faint); text-transform:uppercase; }
+.boot-bar{ height:2px; background:rgba(120,190,220,.14); border-radius:2px; overflow:hidden; margin-top:14px; }
+.boot-bar i{ display:block; height:100%; width:0; background:linear-gradient(90deg,var(--acc),var(--acc-2)); transition:width .3s var(--ease); }
+.boot-skip{ margin-top:13px; font:400 8.5px/1 var(--mono); letter-spacing:.2em; color:var(--ink-faint); text-transform:uppercase; }
 
 /* ── scrollbars ─────────────────────────────────────────── */
-*::-webkit-scrollbar{ width:7px; height:7px; }
+*::-webkit-scrollbar{ width:6px; height:6px; }
 *::-webkit-scrollbar-track{ background:transparent; }
-*::-webkit-scrollbar-thumb{ background:rgba(120,190,220,.16); border-radius:4px; }
+*::-webkit-scrollbar-thumb{ background:rgba(120,190,220,.18); border-radius:4px; }
 *::-webkit-scrollbar-thumb:hover{ background:var(--acc-line); }
 
-/* ── responsive ─────────────────────────────────────────── */
-@media (max-width:1280px){
-  #hud{ grid-template-columns:280px minmax(0,1fr) 300px; }
-}
-@media (max-width:1040px){
-  #hud{
-    grid-template-columns:1fr; grid-auto-rows:min-content;
-    overflow:auto; height:auto; min-height:calc(100% - 66px);
-  }
-  #smRoot{ overflow:auto; }
-  .reactor{ height:260px; }
-  .response{ min-height:220px; }
-  .logpanel{ min-height:240px; }
+/* ── small screens ──────────────────────────────────────── */
+@media (max-width:720px){
   .bar-pills{ display:none; }
+  .reactor-wrap{ width:min(88vw,64vh); }
+  .drawer.left,.drawer.right{ width:100vw; }
+  .drawer.bottom{ width:100vw; max-height:64vh; border-radius:14px 14px 0 0; }
+  .h-left span,.h-right span{ padding:10px 5px; font-size:8px; }
+}
+@media (max-height:560px){
+  #stage{ padding-top:calc(var(--bar-h) + 6px); padding-bottom:34px; }
+  .reactor-wrap{ width:min(62vh,62vw); }
+  #subtitle{ display:none; }
 }
 
 @media (prefers-reduced-motion:reduce){
@@ -618,7 +549,7 @@ html,#smRoot{ height:100%; }
   </div>
 </div>
 
-<!-- ══ dormant — the once-a-day pre-wake state ══ -->
+<!-- ══ dormant — the pre-wake state ══ -->
 <div id="dormant" hidden>
   <div class="dormant-inner">
     <div class="dormant-mark"></div>
@@ -628,152 +559,109 @@ html,#smRoot{ height:100%; }
 
 <!-- ══ ambient layers ══ -->
 <div class="fx-grid"></div>
-<div class="fx-glow g1"></div>
-<div class="fx-glow g2"></div>
-<div class="fx-scan"></div>
 <div class="fx-vignette"></div>
 <div class="fx-noise"></div>
 
-<!-- ══ top bar ══ -->
+<!-- ══ slim top bar ══ -->
 <header id="bar">
   <div class="brand">
-    <div class="sigil"><svg viewBox="0 0 40 40" aria-hidden="true">
-      <circle class="s-ring" cx="20" cy="20" r="17"/>
-      <circle class="s-arc" cx="20" cy="20" r="13"/>
-      <circle class="s-core" cx="20" cy="20" r="5"/>
-    </svg></div>
-    <div class="wordmark">
-      <div class="wm-over">Hermes Agent · direct channel</div>
-      <div class="wm-name">SUPERMAKS</div>
-    </div>
+    <span class="brand-name">SUPERMAKS</span>
   </div>
-
   <div class="bar-pills">
-    <div class="pill" id="pillBrain"><i></i><span>brain</span><b>probing</b></div>
-    <div class="pill" id="pillVoice"><i></i><span>voice</span><b>—</b></div>
-    <div class="pill" id="pillMac"><i></i><span>mac</span><b>—</b></div>
-    <div class="pill" id="pillProfile"><i></i><span>profile</span><b>default</b></div>
+    <div class="pill" id="pillBrain"><i></i><b>—</b></div>
+    <div class="pill" id="pillVoice"><i></i><b>—</b></div>
+    <div class="pill" id="pillMac"><i></i><b>—</b></div>
+    <div class="pill" id="pillProfile"><i></i><b>—</b></div>
   </div>
-
   <div class="bar-right">
-    <button class="ghostbtn" id="paletteBtn" title="Command palette">⌘K</button>
+    <button class="ghostbtn" id="paletteBtn" title="Command palette (⌘K)">⌘K</button>
     <div class="clock" id="clock">--:--:--</div>
   </div>
 </header>
 
-<!-- ══ hud ══ -->
-<main id="hud">
+<!-- ══ the stage: nothing here but the reactor ══ -->
+<main id="stage">
+  <div class="reactor-wrap" id="reactorWrap" title="Click to start or stop voice">
+    <canvas id="core"></canvas>
+    <div class="reactor-readout">
+      <div class="r-state" id="stateWord">STANDBY</div>
+      <div class="r-sub" id="stateSub">awaiting uplink</div>
+    </div>
+  </div>
+  <div id="subtitle" aria-live="polite"></div>
+</main>
 
-  <!-- ─── left ─── -->
-  <aside class="col" id="left">
-    <section class="panel grow">
-      <header class="ph"><h2>Command Matrix</h2><span class="ph-sub">click to run · payload commands stay armed</span></header>
-      <div class="cmds" id="cmds">
-        <button class="cmd" data-cmd="/new"><b>/new</b><span>Fresh thread</span></button>
-        <button class="cmd" data-cmd="/mac"><b>/mac</b><span>Drive the Mac</span></button>
-        <button class="cmd" data-cmd="/screen"><b>/screen</b><span>Capture Mac screen</span></button>
-        <button class="cmd" data-cmd="/browser"><b>/browser</b><span>Chrome operation</span></button>
-        <button class="cmd" data-cmd="/goal"><b>/goal</b><span>Standing objective</span></button>
-        <button class="cmd" data-cmd="/background"><b>/background</b><span>Async mission</span></button>
-        <button class="cmd" data-cmd="/mission"><b>/mission</b><span>Mission queue</span></button>
-        <button class="cmd" data-cmd="/personality"><b>/personality</b><span>Tone overlay</span></button>
-        <button class="cmd" data-cmd="/tools"><b>/tools</b><span>Hermes tools</span></button>
-        <button class="cmd" data-cmd="/commands"><b>/commands</b><span>All commands</span></button>
-      </div>
-    </section>
+<!-- ══ edge handles — the only chrome that stays on screen ══ -->
+<button class="handle h-left"   id="hLeft"   aria-label="Commands (1)"><span>COMMANDS</span></button>
+<button class="handle h-right"  id="hRight"  aria-label="Telemetry (2)"><span>TELEMETRY</span></button>
+<button class="handle h-bottom" id="hBottom" aria-label="Transcript (3)"><span>TRANSCRIPT</span></button>
 
-    <section class="panel">
-      <header class="ph"><h2>Inherited Tools</h2><span class="ph-sub" id="toolCount">—</span></header>
+<!-- ══ drawer · left ══ -->
+<aside class="drawer left" id="drawerLeft" hidden>
+  <div class="drawer-in">
+    <header class="dh"><h2>Command Matrix</h2><button class="dclose" data-close="left">✕</button></header>
+
+    <div class="cmds" id="cmds">
+      <button class="cmd" data-cmd="/new"><b>/new</b><span>Fresh thread</span></button>
+      <button class="cmd" data-cmd="/briefing"><b>/briefing</b><span>Wake report</span></button>
+      <button class="cmd" data-cmd="/mac"><b>/mac</b><span>Drive the Mac</span></button>
+      <button class="cmd" data-cmd="/screen"><b>/screen</b><span>Capture screen</span></button>
+      <button class="cmd" data-cmd="/browser"><b>/browser</b><span>Chrome operation</span></button>
+      <button class="cmd" data-cmd="/goal"><b>/goal</b><span>Standing objective</span></button>
+      <button class="cmd" data-cmd="/background"><b>/background</b><span>Async mission</span></button>
+      <button class="cmd" data-cmd="/mission"><b>/mission</b><span>Mission queue</span></button>
+      <button class="cmd" data-cmd="/personality"><b>/personality</b><span>Tone overlay</span></button>
+      <button class="cmd" data-cmd="/tools"><b>/tools</b><span>Hermes tools</span></button>
+      <button class="cmd" data-cmd="/commands"><b>/commands</b><span>All commands</span></button>
+    </div>
+
+    <section class="block">
+      <div class="blabel">Inherited tools <em id="toolCount">—</em></div>
       <div class="chips" id="toolsList"><span class="chip ghost">reading tool matrix…</span></div>
     </section>
 
-    <section class="panel">
-      <header class="ph"><h2>Uplink</h2><span class="ph-sub" id="armedTag"></span></header>
-      <div class="composer">
-        <textarea id="input" rows="3" spellcheck="false"
-          placeholder="Speak, or type an instruction. Slash commands supported."></textarea>
-        <div class="composer-foot">
-          <span class="hint" id="tip">Try <b>/mac</b> “open my calendar and tell me what’s next”.</span>
-          <span class="keyhint">⌘↵</span>
-        </div>
-      </div>
+    <section class="block">
+      <div class="blabel">Uplink <em id="armedTag"></em></div>
+      <textarea id="input" rows="3" spellcheck="false"
+        placeholder="Speak, or type an instruction. Slash commands supported."></textarea>
+      <div class="keyrow"><span>⌘↵ send</span><span>hold ⌃ to talk</span></div>
     </section>
-  </aside>
+  </div>
+</aside>
 
-  <!-- ─── centre ─── -->
-  <section class="col" id="mid">
-    <div class="reactor">
-      <canvas id="core" aria-label="SuperMaks reactor"></canvas>
-      <div class="reactor-hud">
-        <div class="r-label">SUPERMAKS CORE</div>
-        <div class="r-state" id="stateWord">STANDBY</div>
-        <div class="r-sub" id="stateSub">awaiting uplink</div>
-      </div>
-      <div class="reactor-corners"><i></i><i></i><i></i><i></i></div>
+<!-- ══ drawer · right ══ -->
+<aside class="drawer right" id="drawerRight" hidden>
+  <div class="drawer-in">
+    <header class="dh"><h2>Telemetry</h2><button class="dclose" data-close="right">✕</button></header>
+
+    <div class="tele">
+      <div class="trow"><span>Session</span><b id="sessionTag">none</b></div>
+      <div class="trow"><span>Gateway</span><b id="tGateway">—</b></div>
+      <div class="trow"><span>Runtime</span><b id="tRuntime">—</b></div>
+      <div class="trow"><span>Profile</span><b id="tProfile">—</b></div>
+      <div class="trow"><span>Permission</span><b id="tPerm">—</b></div>
+      <div class="trow"><span>Speech</span><b id="tVoice">—</b></div>
+      <div class="trow"><span>Workdir</span><b id="tWork">—</b></div>
     </div>
 
-    <section class="panel response" id="responsePanel">
-      <header class="ph">
-        <h2>Response</h2>
-        <span class="rtag" id="rtag">idle</span>
-        <span class="ph-spacer"></span>
-        <span class="ph-sub" id="latency"></span>
-      </header>
-      <div class="rbody" id="response"><span class="placeholder">Standing by. Transmit an instruction.</span></div>
-    </section>
-
-    <div class="transport">
-      <button id="mic" class="tbtn mic">
-        <span class="tdot"></span><span class="tlabel">Voice</span>
-        <canvas class="tmeter" id="micMeter"></canvas>
-      </button>
-      <button id="run" class="tbtn primary"><span class="tlabel">Transmit</span><span class="tarrow">▸</span></button>
-      <button id="stop" class="tbtn danger" hidden><span class="tlabel">Stop</span></button>
-      <button id="mute" class="tbtn icon" title="Mute speech">🔊</button>
-      <button id="clearBtn" class="tbtn icon" title="Clear response">⌫</button>
-    </div>
-  </section>
-
-  <!-- ─── right ─── -->
-  <aside class="col" id="right">
-    <section class="panel">
-      <header class="ph"><h2>Telemetry</h2><span class="ph-sub" id="sessionTag">no session</span></header>
-      <div class="tele">
-        <div class="trow"><span>Gateway</span><b id="tGateway">—</b></div>
-        <div class="trow"><span>Runtime</span><b id="tRuntime">—</b></div>
-        <div class="trow"><span>Profile</span><b id="tProfile">—</b></div>
-        <div class="trow"><span>Permission</span><b id="tPerm">—</b></div>
-        <div class="trow"><span>Speech</span><b id="tVoice">—</b></div>
-        <div class="trow"><span>Workdir</span><b id="tWork">—</b></div>
-      </div>
-    </section>
-
-    <section class="panel" id="macPanel">
-      <header class="ph">
-        <h2>Mac Bridge</h2>
-        <span class="ph-spacer"></span>
-        <button class="ghostbtn sm" id="macRefresh" title="Refresh screenshot">↻</button>
-      </header>
-
+    <section class="block">
+      <div class="blabel">Mac bridge <button class="mini" id="macRefresh" title="Refresh screenshot">↻</button></div>
       <div class="macline">
         <span class="dot" id="macDot"></span>
         <b id="macName">—</b>
         <span class="macdetail" id="macDetail">checking…</span>
       </div>
-
       <button class="shot" id="shotWrap" title="Click to enlarge">
         <img id="shot" alt="">
         <div class="shot-empty" id="shotEmpty">no capture yet</div>
         <div class="shot-scan"></div>
       </button>
-
       <div class="macstats">
         <div><span>front</span><b id="macFront">—</b></div>
         <div><span>battery</span><b id="macBatt">—</b></div>
         <div><span>volume</span><b id="macVol">—</b></div>
         <div><span>up</span><b id="macUp">—</b></div>
       </div>
-
       <div class="macacts" id="macActs">
         <button data-mac="lock">Lock</button>
         <button data-mac="playpause">Play/Pause</button>
@@ -784,10 +672,8 @@ html,#smRoot{ height:100%; }
       </div>
     </section>
 
-    <section class="panel grow logpanel">
-      <header class="ph">
-        <h2>Event Stream</h2>
-        <span class="ph-spacer"></span>
+    <section class="block grow">
+      <div class="blabel">Event stream
         <div class="filters" id="logFilters">
           <button class="on" data-f="all">all</button>
           <button data-f="agent">agent</button>
@@ -795,11 +681,36 @@ html,#smRoot{ height:100%; }
           <button data-f="mac">mac</button>
           <button data-f="error">faults</button>
         </div>
-      </header>
+      </div>
       <div class="log" id="log"></div>
     </section>
-  </aside>
-</main>
+  </div>
+</aside>
+
+<!-- ══ drawer · bottom (transcript + transport) ══ -->
+<section class="drawer bottom" id="drawerBottom" hidden>
+  <div class="drawer-in">
+    <header class="dh">
+      <h2>Transcript</h2>
+      <span class="rtag" id="rtag">idle</span>
+      <span class="dh-spacer"></span>
+      <span class="dh-sub" id="latency"></span>
+      <button class="pin" id="pinBottom" title="Keep open">PIN</button>
+      <button class="dclose" data-close="bottom">✕</button>
+    </header>
+    <div class="rbody" id="response"><span class="placeholder">Standing by.</span></div>
+    <div class="transport">
+      <button id="mic" class="tbtn mic">
+        <span class="tdot"></span><span class="tlabel">Voice</span>
+        <canvas class="tmeter" id="micMeter"></canvas>
+      </button>
+      <button id="run" class="tbtn primary"><span class="tlabel">Transmit</span><span class="tarrow">▸</span></button>
+      <button id="stop" class="tbtn danger" hidden><span class="tlabel">Stop</span></button>
+      <button id="mute" class="tbtn icon" title="Mute speech">🔊</button>
+      <button id="clearBtn" class="tbtn icon" title="Clear transcript">⌫</button>
+    </div>
+  </div>
+</section>
 
 <!-- ══ Mac action approvals ══ -->
 <div id="approvals"></div>
@@ -849,6 +760,11 @@ const TOKEN = document.querySelector('meta[name="supermaks-token"]')?.content ||
 const DEMO = !TOKEN || TOKEN === '__SUPERMAKS_' + 'TOKEN__' || location.protocol === 'file:';
 const headers = extra => ({'x-supermaks-token': TOKEN, ...(extra || {})});
 
+/* The element carrying the state-* and open-* classes that drive the whole
+   theme. It's <body> in the real app; the single-file preview bundle swaps
+   this one line for its wrapper div, so no other code has to care. */
+const ROOT_EL = document.getElementById('smRoot');
+
 const RT = {tts:false, stt:false, browserStt:false, browserTts:false, mac:false};
 const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
 const speechSynth = window.speechSynthesis;
@@ -877,7 +793,12 @@ let stateName = 'standby';
 function setState(name, sub){
   stateName = name;
   const [word, cls] = STATES[name] || STATES.standby;
-  document.getElementById('smRoot').className = cls ? 'state-' + cls : '';
+  // Touch only the state-* classes. A blanket `className = ...` would also wipe
+  // the open-* drawer classes and the boot flag, silently closing whatever the
+  // user had open the moment the agent changed state.
+  const b = ROOT_EL;
+  [...b.classList].forEach(c => { if (c.startsWith('state-')) b.classList.remove(c); });
+  if (cls) b.classList.add('state-' + cls);
   $('#stateWord').textContent = word;
   if (sub != null) $('#stateSub').textContent = sub;
 }
@@ -983,132 +904,447 @@ function rmsOf(analyser){
   for (let i = 0; i < buf.length; i++){ const v = (buf[i] - 128) / 128; s += v * v; }
   return Math.sqrt(s / buf.length);
 }
+/* ══════════════ 4. the reactor ══════════════
+   A Mark-II-style arc reactor, drawn on canvas. Anatomy, centre outward:
 
-/* ══════════════ 4. the reactor ══════════════ */
+     plasma torus → containment rim → coil pack (10 windings) → segmented
+     bezel → counter-rotating gimbal rings → audio spectrum → machined
+     housing with bolts → bloom
+
+   The expensive parts (brushed metal, bolt heads, coil bodies, engraved
+   graduations) never change, so they're rendered once into an offscreen
+   canvas and blitted each frame. Only light moves per frame: plasma,
+   coil energy, gimbals, arc discharge, sparks, bloom. That keeps a very
+   dense image at 60fps.
+
+   Everything reactive is driven by real audio — the microphone while
+   listening, the speech playback while talking — so the reactor is an
+   instrument, not a decoration. */
 
 const reactor = (() => {
   const cv = $('#core');
   const ctx = cv.getContext('2d');
-  const BARS = 108;
+  const TAU = Math.PI * 2;
+
+  const SEG  = 10;                 // coil windings, like the Mark II
+  const BARS = 132;                // spectrum resolution
+
   const spectrum = new Float32Array(BARS);
-  let W = 0, H = 0, dpr = 1, t = 0, level = 0, raf = 0;
+  const coil     = new Float32Array(SEG);
+  const coilTarget = new Float32Array(SEG);
+
+  const still = document.createElement('canvas');   // the machined, unmoving parts
+  const sctx  = still.getContext('2d');
+
+  let W = 0, H = 0, dpr = 1, cx = 0, cy = 0, R = 0;
+  let t = 0, level = 0, raf = 0, frame = 0;
+  let acc = '#37e6d0', acc2 = '#7ef4ff';
+  let bolt = [], discharge = [], sparks = [];
   const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  /* deterministic value noise — same housing wear pattern every launch */
+  const hash = n => { const s = Math.sin(n * 127.1) * 43758.5453; return s - Math.floor(s); };
+  const noise = x => {
+    const i = Math.floor(x), f = x - i, u = f * f * (3 - 2 * f);
+    return hash(i) * (1 - u) + hash(i + 1) * u;
+  };
 
   function resize(){
     dpr = Math.min(window.devicePixelRatio || 1, 2);
     const r = cv.getBoundingClientRect();
-    W = r.width; H = r.height;
+    W = Math.max(1, r.width); H = Math.max(1, r.height);
     cv.width = W * dpr; cv.height = H * dpr;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    cx = W / 2; cy = H / 2; R = Math.min(W, H) / 2;
+    buildStill();
   }
   new ResizeObserver(resize).observe(cv);
 
-  const css = n => getComputedStyle(document.getElementById('smRoot')).getPropertyValue(n).trim();
+  /* ── the unmoving machine ─────────────────────────────── */
 
-  function frame(){
-    raf = requestAnimationFrame(frame);
-    t += reduce ? 0.002 : 0.016;
+  function ring(g, r0, r1){
+    g.beginPath();
+    g.arc(cx, cy, r1, 0, TAU);
+    g.arc(cx, cy, r0, TAU, 0, true);
+    g.closePath();
+  }
+
+  /* Brushed metal: hundreds of thin radial wedges at varying lightness,
+     then a directional light pass so it reads as a lit physical surface
+     rather than flat noise. */
+  function brushed(g, r0, r1, lightness, spread){
+    const steps = 420;
+    for (let i = 0; i < steps; i++){
+      const a0 = i / steps * TAU, a1 = (i + 1.4) / steps * TAU;
+      const n = noise(i * 0.09) * 0.6 + noise(i * 0.47) * 0.4;
+      g.fillStyle = `hsl(208 16% ${(lightness + (n - 0.5) * spread).toFixed(1)}%)`;
+      g.beginPath();
+      g.arc(cx, cy, r1, a0, a1);
+      g.arc(cx, cy, r0, a1, a0, true);
+      g.closePath(); g.fill();
+    }
+    // light from upper-left, shadow lower-right
+    g.save(); ring(g, r0, r1); g.clip();
+    const lg = g.createLinearGradient(cx - r1, cy - r1, cx + r1, cy + r1);
+    lg.addColorStop(0,   'rgba(255,255,255,.16)');
+    lg.addColorStop(.42, 'rgba(255,255,255,.02)');
+    lg.addColorStop(.62, 'rgba(0,0,0,.16)');
+    lg.addColorStop(1,   'rgba(0,0,0,.42)');
+    g.fillStyle = lg; g.fillRect(cx - r1, cy - r1, r1 * 2, r1 * 2);
+    g.restore();
+    // machined bevel edges
+    g.lineWidth = Math.max(1, R * 0.004);
+    g.strokeStyle = 'rgba(255,255,255,.10)';
+    g.beginPath(); g.arc(cx, cy, r1, 0, TAU); g.stroke();
+    g.strokeStyle = 'rgba(0,0,0,.55)';
+    g.beginPath(); g.arc(cx, cy, r0, 0, TAU); g.stroke();
+  }
+
+  function boltHead(g, a, r, rad){
+    const x = cx + Math.cos(a) * r, y = cy + Math.sin(a) * r;
+    const bg = g.createRadialGradient(x - rad * .4, y - rad * .4, rad * .1, x, y, rad);
+    bg.addColorStop(0, '#5d6c7d'); bg.addColorStop(.5, '#333e4c'); bg.addColorStop(1, '#141a22');
+    g.fillStyle = bg;
+    g.beginPath(); g.arc(x, y, rad, 0, TAU); g.fill();
+    g.strokeStyle = 'rgba(0,0,0,.6)'; g.lineWidth = Math.max(1, rad * .12);
+    g.beginPath(); g.arc(x, y, rad, 0, TAU); g.stroke();
+    // hex socket
+    g.fillStyle = 'rgba(0,0,0,.62)';
+    g.beginPath();
+    for (let k = 0; k < 6; k++){
+      const ha = a + k / 6 * TAU;
+      const hx = x + Math.cos(ha) * rad * .46, hy = y + Math.sin(ha) * rad * .46;
+      k ? g.lineTo(hx, hy) : g.moveTo(hx, hy);
+    }
+    g.closePath(); g.fill();
+    g.strokeStyle = 'rgba(255,255,255,.10)';
+    g.lineWidth = Math.max(.5, rad * .07);
+    g.beginPath(); g.arc(x, y, rad * .62, a + .6, a + 2.4); g.stroke();
+  }
+
+  function coilPath(g, i, r0, r1, pad){
+    const a = i / SEG * TAU - Math.PI / 2;
+    const half = TAU / SEG / 2 - pad;
+    g.beginPath();
+    g.arc(cx, cy, r1, a - half, a + half);
+    g.arc(cx, cy, r0, a + half * (r1 / r0) * .82, a - half * (r1 / r0) * .82, true);
+    g.closePath();
+  }
+
+  function buildStill(){
+    still.width = cv.width; still.height = cv.height;
+    sctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    sctx.clearRect(0, 0, W, H);
+    const g = sctx;
+    if (R <= 4) return;
+
+    // ── outer housing
+    brushed(g, R * .795, R * .972, 19, 14);
+    // bolt ring
+    bolt = [];
+    const bn = 12, br = R * .884, brad = R * .026;
+    for (let i = 0; i < bn; i++){
+      const a = i / bn * TAU - Math.PI / 2;
+      boltHead(g, a, br, brad);
+      bolt.push(a);
+    }
+    // engraved graduations on the housing inner lip
+    g.strokeStyle = 'rgba(190,220,235,.16)';
+    for (let i = 0; i < 180; i++){
+      const a = i / 180 * TAU, major = i % 15 === 0;
+      g.lineWidth = major ? Math.max(1, R * .005) : Math.max(.5, R * .002);
+      const r0 = R * (major ? .806 : .812);
+      g.beginPath();
+      g.moveTo(cx + Math.cos(a) * r0, cy + Math.sin(a) * r0);
+      g.lineTo(cx + Math.cos(a) * R * .828, cy + Math.sin(a) * R * .828);
+      g.stroke();
+    }
+
+    // ── mid bezel
+    brushed(g, R * .565, R * .60, 12, 9);
+
+    // ── coil pack bodies
+    const cr0 = R * .275, cr1 = R * .53;
+    for (let i = 0; i < SEG; i++){
+      coilPath(g, i, cr0, cr1, .034);
+      const a = i / SEG * TAU - Math.PI / 2;
+      const gx = cx + Math.cos(a) * cr0, gy = cy + Math.sin(a) * cr0;
+      const cg = g.createRadialGradient(gx, gy, cr0 * .1, cx, cy, cr1);
+      cg.addColorStop(0,   '#2a3340');
+      cg.addColorStop(.45, '#171e28');
+      cg.addColorStop(1,   '#0b1017');
+      g.fillStyle = cg; g.fill();
+      g.strokeStyle = 'rgba(150,190,215,.13)';
+      g.lineWidth = Math.max(1, R * .0035); g.stroke();
+
+      // windings
+      g.save(); coilPath(g, i, cr0, cr1, .034); g.clip();
+      const turns = 13;
+      for (let k = 0; k <= turns; k++){
+        const rr = cr0 + (cr1 - cr0) * (k / turns);
+        g.strokeStyle = k % 2 ? 'rgba(0,0,0,.42)' : 'rgba(196,150,96,.20)';
+        g.lineWidth = Math.max(.6, R * .0045);
+        g.beginPath(); g.arc(cx, cy, rr, 0, TAU); g.stroke();
+      }
+      g.restore();
+    }
+
+    // ── containment rim around the plasma chamber
+    brushed(g, R * .205, R * .268, 17, 10);
+
+    // ── chamber floor (dark, so the readout text stays legible)
+    const fg = g.createRadialGradient(cx, cy, 0, cx, cy, R * .21);
+    fg.addColorStop(0, '#05080d'); fg.addColorStop(1, '#020407');
+    g.fillStyle = fg;
+    g.beginPath(); g.arc(cx, cy, R * .21, 0, TAU); g.fill();
+  }
+
+  /* ── discharge arcs ───────────────────────────────────── */
+
+  function spawnDischarge(){
+    const seg = Math.floor(Math.random() * SEG);
+    const a = seg / SEG * TAU - Math.PI / 2;
+    const pts = [[R * .20, a + (Math.random() - .5) * .3], [R * .285, a + (Math.random() - .5) * .12]];
+    // midpoint displacement in polar space
+    for (let pass = 0; pass < 4; pass++){
+      const next = [pts[0]];
+      for (let i = 0; i < pts.length - 1; i++){
+        const [r1, a1] = pts[i], [r2, a2] = pts[i + 1];
+        const amp = (1 - pass / 5) * .09;
+        next.push([(r1 + r2) / 2, (a1 + a2) / 2 + (Math.random() - .5) * amp]);
+        next.push(pts[i + 1]);
+      }
+      pts.length = 0; pts.push(...next);
+    }
+    discharge.push({ pts, life: 1, seg });
+    coilTarget[seg] = 1;
+  }
+
+  /* ── the frame ────────────────────────────────────────── */
+
+  function draw(){
+    raf = requestAnimationFrame(draw);
+    frame++;
+    t += reduce ? 0.0016 : 0.016;
+
+    if (frame % 15 === 0){
+      const cs = getComputedStyle(ROOT_EL);
+      acc  = cs.getPropertyValue('--acc').trim()   || acc;
+      acc2 = cs.getPropertyValue('--acc-2').trim() || acc2;
+    }
 
     const analyser = liveAnalyser();
-    /* Idle breathing when there's no real audio, so a quiet core still looks
-       alive without pretending to visualise something. */
     const target = analyser ? clamp(rmsOf(analyser) * 4.2, 0, 1)
                             : 0.10 + Math.sin(t * 1.15) * 0.045;
-    level += (target - level) * 0.18;
-
-    const acc = css('--acc') || '#37e6d0';
-    const acc2 = css('--acc-2') || '#7ef4ff';
-    const cx = W / 2, cy = H / 2;
-    const R = Math.min(W, H) / 2 - 8;
+    level += (target - level) * 0.16;
 
     ctx.clearRect(0, 0, W, H);
-    if (R <= 0) return;
+    if (R <= 4) return;
 
-    // spectrum, mirrored so the ring reads symmetrically
+    // spectrum
     if (analyser){
       const freq = freqBuf(analyser);
       analyser.getByteFrequencyData(freq);
       const half = BARS / 2;
       for (let i = 0; i < half; i++){
-        const v = (freq[Math.floor(i / half * (freq.length * 0.62))] || 0) / 255;
-        spectrum[half + i] += (v - spectrum[half + i]) * 0.32;
+        const v = (freq[Math.floor(i / half * (freq.length * .58))] || 0) / 255;
+        spectrum[half + i] += (v - spectrum[half + i]) * .34;
         spectrum[half - 1 - i] = spectrum[half + i];
       }
     } else {
       for (let i = 0; i < BARS; i++){
-        const v = (Math.sin(t * 1.6 + i * 0.42) * 0.5 + 0.5) * (0.10 + level * 0.5);
-        spectrum[i] += (v - spectrum[i]) * 0.1;
+        const v = (Math.sin(t * 1.5 + i * .38) * .5 + .5) * (.08 + level * .45);
+        spectrum[i] += (v - spectrum[i]) * .09;
       }
     }
 
-    // ── outer tick ring
-    ctx.save(); ctx.translate(cx, cy); ctx.rotate(t * 0.055);
-    for (let i = 0; i < 120; i++){
-      const a = i / 120 * Math.PI * 2, major = i % 10 === 0;
-      const r0 = R * (major ? 0.955 : 0.975);
-      ctx.globalAlpha = major ? 0.5 : 0.2;
-      ctx.strokeStyle = acc; ctx.lineWidth = major ? 1.4 : 1;
+    // coil energy chases the spectrum, with a rotating bias so power
+    // visibly cycles around the ring
+    for (let i = 0; i < SEG; i++){
+      const s = spectrum[Math.floor(i / SEG * BARS)] || 0;
+      const sweep = Math.pow(Math.max(0, Math.sin(t * 1.1 - i / SEG * TAU)), 6);
+      coilTarget[i] = clamp(.16 + s * .9 + sweep * .5 + level * .3, 0, 1.4);
+      coil[i] += (coilTarget[i] - coil[i]) * .17;
+    }
+
+    ctx.drawImage(still, 0, 0, W, H);
+
+    // ── coil glow (additive, over the machined bodies)
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    const cr0 = R * .275, cr1 = R * .53;
+    for (let i = 0; i < SEG; i++){
+      const e = coil[i];
+      const a = i / SEG * TAU - Math.PI / 2;
+      const gx = cx + Math.cos(a) * cr0, gy = cy + Math.sin(a) * cr0;
+      // light emitted from the coil's inner edge and falling off outward —
+      // a filled wedge reads as a paper cutout, a gradient reads as glow
+      const cg = ctx.createRadialGradient(gx, gy, 0, gx, gy, (cr1 - cr0) * .95);
+      cg.addColorStop(0, acc2); cg.addColorStop(.22, acc); cg.addColorStop(1, 'rgba(0,0,0,0)');
+      ctx.globalAlpha = clamp(e * .42, 0, .7);
+      coilPath(ctx, i, cr0, cr1, .034);
+      ctx.fillStyle = cg; ctx.fill();
+      // bright inner tip
+      ctx.globalAlpha = clamp(e * .95, 0, 1);
+      ctx.strokeStyle = acc2;
+      ctx.lineWidth = Math.max(1.2, R * .008);
       ctx.beginPath();
-      ctx.moveTo(Math.cos(a) * r0, Math.sin(a) * r0);
-      ctx.lineTo(Math.cos(a) * R, Math.sin(a) * R);
+      const half = TAU / SEG / 2 - .034;
+      ctx.arc(cx, cy, cr0 * 1.01, a - half * .8, a + half * .8);
       ctx.stroke();
     }
     ctx.restore();
 
-    // ── rotating arc segments
-    const arcs = [
-      {r:0.90, from:0.00, len:1.15, sp: 0.30, w:2.2, a:0.85},
-      {r:0.80, from:2.20, len:0.85, sp:-0.22, w:1.6, a:0.55},
-      {r:0.71, from:4.10, len:1.70, sp: 0.16, w:1.1, a:0.35},
+    // ── counter-rotating gimbal rings
+    const gimbals = [
+      { r: .615, from: 0,    len: 1.25, sp:  .34, w: .0115, a: .9  },
+      { r: .672, from: 2.3,  len: .78,  sp: -.23, w: .0075, a: .62 },
+      { r: .724, from: 4.1,  len: 1.9,  sp:  .15, w: .005,  a: .4  },
+      { r: .758, from: 5.2,  len: .5,   sp: -.44, w: .009,  a: .75 },
     ];
-    for (const arc of arcs){
-      ctx.save(); ctx.translate(cx, cy);
-      ctx.globalAlpha = arc.a;
-      ctx.strokeStyle = acc2; ctx.lineWidth = arc.w; ctx.lineCap = 'round';
-      ctx.shadowBlur = 16; ctx.shadowColor = acc;
+    ctx.save(); ctx.globalCompositeOperation = 'lighter'; ctx.lineCap = 'round';
+    for (const gm of gimbals){
+      ctx.globalAlpha = gm.a * (.55 + level * .5);
+      ctx.strokeStyle = acc2;
+      ctx.shadowBlur = R * .05; ctx.shadowColor = acc;
+      ctx.lineWidth = Math.max(1, R * gm.w);
       ctx.beginPath();
-      ctx.arc(0, 0, R * arc.r, arc.from + t * arc.sp, arc.from + arc.len + t * arc.sp);
-      ctx.stroke();
-      ctx.restore();
-    }
-
-    // ── radial spectrum
-    const inner = R * 0.44, span = R * 0.22;
-    ctx.save(); ctx.translate(cx, cy); ctx.rotate(-Math.PI / 2);
-    for (let i = 0; i < BARS; i++){
-      const a = i / BARS * Math.PI * 2;
-      const h = span * (0.10 + spectrum[i] * 0.95);
-      ctx.globalAlpha = 0.25 + spectrum[i] * 0.75;
-      ctx.strokeStyle = i % 9 === 0 ? acc2 : acc;
-      ctx.lineWidth = 2; ctx.lineCap = 'round';
-      ctx.beginPath();
-      ctx.moveTo(Math.cos(a) * inner, Math.sin(a) * inner);
-      ctx.lineTo(Math.cos(a) * (inner + h), Math.sin(a) * (inner + h));
+      ctx.arc(cx, cy, R * gm.r, gm.from + t * gm.sp, gm.from + gm.len + t * gm.sp);
       ctx.stroke();
     }
     ctx.restore();
 
-    // ── core
-    const cr = R * (0.27 + level * 0.06);
-    const g = ctx.createRadialGradient(cx, cy - cr * 0.2, 0, cx, cy, cr);
-    g.addColorStop(0, '#ffffff');
-    g.addColorStop(0.22, acc2);
-    g.addColorStop(0.62, acc);
-    g.addColorStop(1, 'rgba(2,10,16,0)');
-    ctx.globalAlpha = 0.34 + level * 0.5;
-    ctx.fillStyle = g;
-    ctx.beginPath(); ctx.arc(cx, cy, cr, 0, Math.PI * 2); ctx.fill();
+    // ── audio spectrum ring
+    const sInner = R * .618, sSpan = R * .155;
+    ctx.save(); ctx.globalCompositeOperation = 'lighter';
+    ctx.translate(cx, cy); ctx.rotate(-Math.PI / 2);
+    ctx.shadowBlur = R * .03; ctx.shadowColor = acc;
+    ctx.lineCap = 'round';
+    for (let i = 0; i < BARS; i++){
+      const a = i / BARS * TAU;
+      const h = sSpan * (.07 + spectrum[i] * 1.1);
+      ctx.globalAlpha = .3 + spectrum[i] * .7;
+      ctx.strokeStyle = i % 11 === 0 ? acc2 : acc;
+      ctx.lineWidth = Math.max(1.3, R * .0055);
+      ctx.beginPath();
+      ctx.moveTo(Math.cos(a) * sInner, Math.sin(a) * sInner);
+      ctx.lineTo(Math.cos(a) * (sInner + h), Math.sin(a) * (sInner + h));
+      ctx.stroke();
+    }
+    ctx.restore();
 
-    ctx.globalAlpha = 0.65;
-    ctx.strokeStyle = acc; ctx.lineWidth = 1;
-    ctx.shadowBlur = 20; ctx.shadowColor = acc;
-    ctx.beginPath(); ctx.arc(cx, cy, cr, 0, Math.PI * 2); ctx.stroke();
-    ctx.shadowBlur = 0; ctx.globalAlpha = 1;
+    // ── discharge arcs from the plasma to the coils
+    if (!reduce && Math.random() < .08 + level * .5) spawnDischarge();
+    ctx.save(); ctx.globalCompositeOperation = 'lighter'; ctx.lineCap = 'round';
+    discharge = discharge.filter(d => {
+      d.life -= .085;
+      if (d.life <= 0) return false;
+      ctx.globalAlpha = d.life * .9;
+      ctx.strokeStyle = '#ffffff';
+      ctx.shadowBlur = R * .06; ctx.shadowColor = acc2;
+      ctx.lineWidth = Math.max(.8, R * .0035 * d.life);
+      ctx.beginPath();
+      d.pts.forEach(([r, a], i) => {
+        const x = cx + Math.cos(a) * r, y = cy + Math.sin(a) * r;
+        i ? ctx.lineTo(x, y) : ctx.moveTo(x, y);
+      });
+      ctx.stroke();
+      return true;
+    });
+    ctx.restore();
+
+    // ── plasma torus
+    // A torus rather than a filled disc: the bright band sits at ~.17R and
+    // falls off inward, which is both how the real prop reads and what keeps
+    // the readout text on top of it legible.
+    ctx.save(); ctx.globalCompositeOperation = 'lighter';
+    const pr = R * (.185 + level * .022);
+    const pg = ctx.createRadialGradient(cx, cy, R * .02, cx, cy, pr * 1.5);
+    pg.addColorStop(0,   'rgba(120,190,220,.16)');
+    pg.addColorStop(.52, acc2);
+    pg.addColorStop(.72, acc);
+    pg.addColorStop(1,   'rgba(0,0,0,0)');
+    ctx.globalAlpha = .5 + level * .45;
+    ctx.fillStyle = pg;
+    ctx.beginPath(); ctx.arc(cx, cy, pr * 1.5, 0, TAU); ctx.fill();
+
+    // swirling hot spots inside the chamber
+    for (let i = 0; i < 3; i++){
+      const a = t * (.6 + i * .35) + i * 2.1;
+      const rr = R * (.11 + .035 * Math.sin(t * 1.3 + i));
+      const x = cx + Math.cos(a) * rr, y = cy + Math.sin(a) * rr;
+      const sg = ctx.createRadialGradient(x, y, 0, x, y, R * .085);
+      sg.addColorStop(0, 'rgba(255,255,255,.5)');
+      sg.addColorStop(.4, acc2);
+      sg.addColorStop(1, 'rgba(0,0,0,0)');
+      ctx.globalAlpha = .3 + level * .4;
+      ctx.fillStyle = sg;
+      ctx.beginPath(); ctx.arc(x, y, R * .085, 0, TAU); ctx.fill();
+    }
+
+    // containment ring highlight
+    ctx.globalAlpha = .85;
+    ctx.strokeStyle = acc2;
+    ctx.shadowBlur = R * .07; ctx.shadowColor = acc;
+    ctx.lineWidth = Math.max(1.4, R * .009);
+    ctx.beginPath(); ctx.arc(cx, cy, R * .2, 0, TAU); ctx.stroke();
+    ctx.restore();
+
+    // ── specular sweep
+    // A moving highlight raked across the housing, rather than light rays out
+    // of the core: this is a machined metal object, and what sells that is a
+    // light source travelling over the surface, not a starburst.
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    ring(ctx, R * .565, R * .972); ctx.clip();
+    const sweepA = t * .35;
+    const sx = cx + Math.cos(sweepA) * R, sy = cy + Math.sin(sweepA) * R;
+    const sg2 = ctx.createRadialGradient(sx, sy, 0, sx, sy, R * 1.15);
+    sg2.addColorStop(0,   'rgba(210,235,255,.15)');
+    sg2.addColorStop(.28, 'rgba(160,200,230,.05)');
+    sg2.addColorStop(1,   'rgba(0,0,0,0)');
+    ctx.globalAlpha = .85;
+    ctx.fillStyle = sg2;
+    ctx.fillRect(cx - R, cy - R, R * 2, R * 2);
+    ctx.restore();
+
+    // inner lip shadow, so the housing reads as a deep bezel rather than a decal
+    ctx.save();
+    const lip = ctx.createRadialGradient(cx, cy, R * .565, cx, cy, R * .70);
+    lip.addColorStop(0, 'rgba(0,0,0,.55)');
+    lip.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = lip;
+    ring(ctx, R * .565, R * .70); ctx.fill();
+    ctx.restore();
+
+    // ── orbiting sparks
+    if (!reduce && sparks.length < 26 && Math.random() < .3){
+      sparks.push({ a: Math.random() * TAU, r: R * (.3 + Math.random() * .45),
+                    v: (Math.random() - .5) * .012, life: 1, s: Math.random() });
+    }
+    ctx.save(); ctx.globalCompositeOperation = 'lighter';
+    sparks = sparks.filter(p => {
+      p.a += p.v; p.life -= .006;
+      if (p.life <= 0) return false;
+      ctx.globalAlpha = p.life * .7;
+      ctx.fillStyle = p.s > .5 ? acc2 : acc;
+      const x = cx + Math.cos(p.a) * p.r, y = cy + Math.sin(p.a) * p.r;
+      ctx.beginPath(); ctx.arc(x, y, Math.max(.7, R * .0035 * p.life), 0, TAU); ctx.fill();
+      return true;
+    });
+    ctx.restore();
+
+    // ── outer bloom
+    ctx.save(); ctx.globalCompositeOperation = 'lighter';
+    const bg = ctx.createRadialGradient(cx, cy, R * .1, cx, cy, R * 1.15);
+    bg.addColorStop(0, acc); bg.addColorStop(.35, 'rgba(0,0,0,0)');
+    ctx.globalAlpha = .10 + level * .2;
+    ctx.fillStyle = bg;
+    ctx.beginPath(); ctx.arc(cx, cy, R * 1.15, 0, TAU); ctx.fill();
+    ctx.restore();
   }
 
-  return {
-    start(){ resize(); if (!raf) frame(); },
-  };
+  return { start(){ resize(); if (!raf) draw(); } };
 })();
 
 /* the small live meter inside the Voice button */
@@ -1125,7 +1361,7 @@ const micMeter = (() => {
     vals[i = (i + 1) % N] = (convo || pttArmed) ? clamp(rmsOf(bus.micAnalyser) * 5, 0, 1) : 0;
     ctx.clearRect(0, 0, w, h);
     const bw = w / N;
-    ctx.fillStyle = getComputedStyle(document.getElementById('smRoot')).getPropertyValue('--acc').trim() || '#37e6d0';
+    ctx.fillStyle = getComputedStyle(ROOT_EL).getPropertyValue('--acc').trim() || '#37e6d0';
     for (let k = 0; k < N; k++){
       const v = vals[(i + 1 + k) % N];
       const bh = Math.max(1, v * h);
@@ -1159,6 +1395,8 @@ async function transmit(message, options = {}){
   $('#latency').textContent = '';
   $('#response').innerHTML = '<span class="cur"></span>';
   $('#stop').hidden = false;
+  setSubtitle('');
+  revealTranscript();
   log('run','RUN',`${id} · ${message.slice(0,70)}`);
 
   const t0 = performance.now();
@@ -1203,6 +1441,8 @@ async function transmit(message, options = {}){
   $('#stop').hidden = true;
   clearInterval(tick);
   await speakDone;
+  setSubtitle('');
+  releaseTranscript();
 }
 
 function handleEvent(ev){
@@ -1257,6 +1497,7 @@ function renderAnswer(final){
   const el = $('#response');
   el.innerHTML = esc(answer) + (final ? '' : '<span class="cur"></span>');
   el.scrollTop = el.scrollHeight;
+  setSubtitle(lastSentence(answer));
 }
 
 /* ══════════════ 6. voice out ══════════════ */
@@ -1662,7 +1903,8 @@ document.addEventListener('keydown', e => {
   if (e.key === 'Escape'){
     if (!$('#lightbox').hidden){ $('#lightbox').hidden = true; return; }
     if (running) return cancelRun();
-    if (convo) stopConvo();
+    if (convo) return stopConvo();
+    if (DRAWERS.some(drawerOpen)) closeAllDrawers();
   }
 });
 
@@ -2197,6 +2439,87 @@ async function shipPTT(){
   }
 }
 
+/* ══════════════ 10d. drawers ══════════════
+   Nothing but the reactor is on screen by default. The three drawers live
+   off-canvas behind edge handles; opening one only adds a body class, so the
+   CSS owns all the motion and there's no layout thrash. */
+
+const DRAWERS = ['left', 'right', 'bottom'];
+let bottomPinned = false;
+
+function drawerOpen(side){ return ROOT_EL.classList.contains('open-' + side); }
+
+function setDrawer(side, open){
+  ROOT_EL.classList.toggle('open-' + side, open);
+  const el = $('#drawer' + side[0].toUpperCase() + side.slice(1));
+  if (!el) return;
+  if (open){
+    el.hidden = false;
+  } else {
+    // keep it in the DOM until the slide-out finishes, or it vanishes instantly
+    setTimeout(() => { if (!drawerOpen(side)) el.hidden = true; }, 340);
+  }
+  // Deliberately no autofocus: focusing the composer would make the number
+  // shortcuts type into it instead of switching drawers.
+}
+
+function toggleDrawer(side){ setDrawer(side, !drawerOpen(side)); }
+function closeAllDrawers(){ DRAWERS.forEach(s => setDrawer(s, false)); }
+
+$('#hLeft').onclick   = () => toggleDrawer('left');
+$('#hRight').onclick  = () => toggleDrawer('right');
+$('#hBottom').onclick = () => toggleDrawer('bottom');
+$$('[data-close]').forEach(b => { b.onclick = () => setDrawer(b.dataset.close, false); });
+
+$('#pinBottom').onclick = e => {
+  bottomPinned = !bottomPinned;
+  e.currentTarget.classList.toggle('on', bottomPinned);
+};
+
+// The reactor is the whole interface — clicking it starts and stops voice.
+$('#reactorWrap').onclick = () => { if (!dormantOn) micToggle(); };
+
+document.addEventListener('keydown', e => {
+  const typing = /^(INPUT|TEXTAREA)$/.test(document.activeElement?.tagName || '');
+  if (typing || e.metaKey || e.ctrlKey || e.altKey) return;
+  if (e.key === '1'){ e.preventDefault(); toggleDrawer('left'); }
+  if (e.key === '2'){ e.preventDefault(); toggleDrawer('right'); }
+  if (e.key === '3'){ e.preventDefault(); toggleDrawer('bottom'); }
+});
+
+/* The transcript drawer reveals itself while SuperMaks is answering, then
+   gets out of the way again — unless it's pinned, or you opened it yourself. */
+let autoOpenedBottom = false, bottomHideTimer = null;
+
+function revealTranscript(){
+  if (bottomPinned || drawerOpen('bottom')) return;
+  autoOpenedBottom = true;
+  setDrawer('bottom', true);
+}
+function releaseTranscript(){
+  clearTimeout(bottomHideTimer);
+  if (!autoOpenedBottom || bottomPinned) return;
+  bottomHideTimer = setTimeout(() => {
+    if (autoOpenedBottom && !bottomPinned && !running){
+      setDrawer('bottom', false);
+      autoOpenedBottom = false;
+    }
+  }, 6000);
+}
+
+/* One line of what's being said, under the reactor. The full text lives in
+   the transcript drawer; this is just enough to follow along at a glance. */
+function setSubtitle(text){
+  const el = $('#subtitle');
+  const line = String(text || '').trim();
+  el.textContent = line;
+  el.classList.toggle('on', !!line);
+}
+function lastSentence(text){
+  const parts = String(text || '').trim().split(/(?<=[.!?…])\s+/).filter(Boolean);
+  return parts.length ? parts[parts.length - 1] : '';
+}
+
 /* ══════════════ 11. boot ══════════════ */
 
 const BOOT_LINES = [
@@ -2240,7 +2563,7 @@ function bootSequence(){
   }
   await boot;
 
-  document.getElementById('smRoot').classList.remove('state-boot');
+  ROOT_EL.classList.remove('state-boot');
 
   lastActivity = Date.now();       // boot itself starts the idle clock fresh
   enterDormant();                  // dormant on every launch — see enterDormant() for the fallback
