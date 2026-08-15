@@ -227,6 +227,62 @@ To keep it up automatically, save this as
 
 ---
 
+## The wake phrase
+
+Say **"wake up daddy's home"** at the dormant screen and, once a day, SuperMaks
+wakes and runs `/briefing`: a live check of your mail and calendar, opened with
+"Welcome home, sir," followed by one dry aside about whatever's actually on
+today's calendar, then an offer — never an action — on the emails.
+
+Between hearing the phrase and answering, it plays **"Should I Stay or Should
+I Go" by The Clash**, from the top, for up to `WAKE_SONG_SECONDS` (default
+105s — about a minute forty-five). Three ways to source it, set in `.env`:
+
+```bash
+WAKE_SONG_SOURCE=youtube              # default — nothing downloaded or stored
+WAKE_SONG_YOUTUBE_ID=xMaE6toi4mk      # the official video, embedded client-side
+
+# or, to use a copy you already own instead of YouTube:
+WAKE_SONG_SOURCE=local
+WAKE_SONG_LOCAL_PATH=/home/you/Music/should-i-stay-or-should-i-go.mp3
+
+# or skip it entirely:
+WAKE_SONG_SOURCE=off
+```
+
+No audio file ships with this repo, and none ever will — that would mean
+redistributing someone else's copyrighted recording via git, which isn't
+something this project does. `youtube` embeds the video the same way any
+webpage embeds a YouTube player; `local` streams a file already sitting on
+your machine, gated behind the same session token as everything else. A Skip
+button is always available if you'd rather move straight to the briefing.
+
+Autoplay triggered from a voice callback (rather than a click) is something
+browsers are free to block, so this never holds the greeting hostage — it
+gives the song a few seconds to actually start and moves on regardless if it
+doesn't.
+
+Say the phrase once and the wake listener turns itself off until the calendar
+date changes — see the *Voice-first* behavior below for the mechanics.
+
+## Voice-first: wake phrase, briefing, push-to-talk
+
+The HUD boots into a near-black **dormant** screen once a day — no HUD, no
+lines, just a slow breathing mark — and listens, locally in the browser, only
+for the wake phrase. It never touches Fish Audio for this: streaming your mic
+to a paid endpoint all day to catch one phrase would be slow and wasteful, and
+the browser's own recognizer does it for free. Say the phrase (or tap the
+screen as a failsafe) and it fires `/briefing`, marks today done, and the wake
+listener stays off until the date rolls over — checked against `localStorage`,
+so a reload won't re-trigger it, and a tab left open past midnight self-rearms.
+
+For everything else that day, **long-press Control** — 320ms, so a stray tap
+does nothing — arms the mic for push-to-talk. It stops on whichever comes
+first: releasing the key, or 220ms of silence, instead of the continuous
+conversation loop's 900ms tail. Requires a Chromium-based browser for the wake
+phrase and push-to-talk's fast path (same limitation the STT fallback already
+had); the Voice button and typing work everywhere regardless.
+
 ## Command matrix
 
 Every button runs its base command immediately. Commands that take a payload
@@ -280,6 +336,10 @@ The HUD ships no fonts and no libraries — it has to work on a machine bound to
 | `FISH_AUDIO_API_KEY` | — | enables server-side speech |
 | `FISH_AUDIO_MODEL` | `s2.1-pro-free` | synthesis engine |
 | `FISH_AUDIO_VOICE_ID` | `612b878b…` | voice `reference_id` |
+| `WAKE_SONG_SOURCE` | `youtube` | `youtube`, `local`, or `off` |
+| `WAKE_SONG_YOUTUBE_ID` | `xMaE6toi4mk` | video embedded on wake |
+| `WAKE_SONG_LOCAL_PATH` | — | a file you own, used when source is `local` |
+| `WAKE_SONG_SECONDS` | `105` | how long the jingle plays before it's cut |
 | `MAC_ENABLED` | `1` | switch the Mac bridge off entirely |
 | `MAC_SSH_HOST` | `mac` | ssh alias or `user@host` |
 | `MAC_SHOT_PX` | `1100` | screenshot long edge |

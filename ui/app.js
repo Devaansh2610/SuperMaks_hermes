@@ -980,6 +980,7 @@ async function loadStatus(){
   RT.mac = !!s.mac_enabled;
   RT.browserStt = !!SpeechRecognition;
   RT.browserTts = !!speechSynth;
+  if (s.wake_song) WAKE_SONG = s.wake_song;
 
   const hermes = s.runtime === 'hermes';
   pill('#pillBrain',  hermes ? 'ok' : 'bad', hermes ? 'Hermes' : 'offline');
@@ -1104,7 +1105,101 @@ function handleWake(){
   markWoken();
   exitDormant();
   log('voice','WAKE','wake phrase heard');
-  setTimeout(() => transmit('/briefing'), 650);   // let the exit animation clear first
+  setTimeout(async () => {
+    await playWakeSong();          // resolves quickly on its own if blocked, off, or skipped
+    transmit('/briefing');
+  }, 650);                         // let the exit animation clear first
+}
+
+/* ── the wake jingle ──
+   "Should I Stay or Should I Go" by The Clash, from the top, capped at
+   WAKE_SONG.seconds (~1:45). Three sources, chosen in .env:
+     youtube — the browser embeds the official video client-side; nothing is
+               downloaded or stored by this project, ever
+     local   — streams a file you already own, from this machine
+     off     — skipped entirely
+   Autoplay triggered from a speech-recognition callback (not a click) is
+   often blocked by the browser, so this never blocks the greeting: it gives
+   itself a few seconds to actually start, then moves on regardless. */
+
+let WAKE_SONG = {source:'off', youtube_id:'', local_ready:false, seconds:105};
+let wakeSongPlayer = null, wakeSongAudio = null, wakeSongTimer = null;
+
+function showSongBanner(on, label){
+  $('#songBanner').hidden = !on;
+  if (label) $('#songLabel').textContent = label;
+}
+
+function stopWakeSong(){
+  if (wakeSongTimer){ clearTimeout(wakeSongTimer); wakeSongTimer = null; }
+  if (wakeSongPlayer){ try { wakeSongPlayer.stopVideo(); wakeSongPlayer.destroy(); } catch(_){} wakeSongPlayer = null; }
+  if (wakeSongAudio){ try { wakeSongAudio.pause(); } catch(_){} wakeSongAudio = null; }
+  showSongBanner(false);
+}
+
+function loadYouTubeAPI(){
+  return new Promise(resolve => {
+    if (window.YT && window.YT.Player) return resolve();
+    const prev = window.onYouTubeIframeAPIReady;
+    window.onYouTubeIframeAPIReady = () => { prev?.(); resolve(); };
+    if (!document.getElementById('ytIframeApi')){
+      const s = document.createElement('script');
+      s.id = 'ytIframeApi'; s.src = 'https://www.youtube.com/iframe_api';
+      document.head.appendChild(s);
+    }
+  });
+}
+
+function playWakeSong(){
+  return new Promise(resolve => {
+    const usable = !DEMO && (
+      (WAKE_SONG.source === 'youtube' && WAKE_SONG.youtube_id) ||
+      (WAKE_SONG.source === 'local'   && WAKE_SONG.local_ready)
+    );
+    if (!usable) return resolve();
+
+    let done = false;
+    const finish = () => { if (done) return; done = true; stopWakeSong(); resolve(); };
+    // Autoplay from a non-click callback may just be refused outright — never
+    // let the wake-up greeting hang on it.
+    const graceTimer = setTimeout(finish, 4000);
+    const cap = Math.max(5, WAKE_SONG.seconds || 105) * 1000;
+
+    showSongBanner(true, WAKE_SONG.source === 'youtube'
+      ? 'Should I Stay or Should I Go — The Clash' : 'wake song');
+    $('#songSkip').onclick = finish;
+
+    if (WAKE_SONG.source === 'youtube'){
+      loadYouTubeAPI().then(() => {
+        try {
+          wakeSongPlayer = new YT.Player('wakeSongHost', {
+            videoId: WAKE_SONG.youtube_id,
+            playerVars: {autoplay:1, start:0, controls:0, modestbranding:1, rel:0, playsinline:1},
+            events: {
+              onReady: e => { clearTimeout(graceTimer); e.target.playVideo(); wakeSongTimer = setTimeout(finish, cap); },
+              onStateChange: e => { if (window.YT && e.data === YT.PlayerState.ENDED) finish(); },
+              onError: finish,
+            },
+          });
+        } catch(_){ finish(); }
+      }).catch(finish);
+      return;
+    }
+
+    // local
+    api('/api/wake-song', {headers: headers()})
+      .then(r => r.ok ? r.blob() : Promise.reject(new Error('wake-song ' + r.status)))
+      .then(blob => {
+        clearTimeout(graceTimer);
+        const url = URL.createObjectURL(blob);
+        wakeSongAudio = new Audio(url);
+        wakeSongAudio.onended = finish;
+        wakeSongAudio.onerror = finish;
+        wakeSongTimer = setTimeout(finish, cap);
+        return wakeSongAudio.play();
+      })
+      .catch(finish);
+  });
 }
 
 // A tap on the dormant screen is the failsafe if the mic never catches it.
@@ -1334,6 +1429,7 @@ function mockFetch(url, opts = {}){
     model:'Hermes default', tools:['terminal','browser','files','google_workspace','memory','mcp:notion','mac-bridge'],
     stt:'fish', tts:'fish', voice_model:'s2.1-pro-free', voice_id:'612b878b113047d9a770c069c8b4fdfe',
     mac_enabled:true, mac_host:'mac', session:null,
+    wake_song:{source:'youtube', youtube_id:'xMaE6toi4mk', local_ready:false, seconds:105},
   });
 
   if (url === '/api/mac') return json({

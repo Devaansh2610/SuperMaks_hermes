@@ -50,6 +50,16 @@ RUN_LOCK = threading.Lock()
 MAX_JSON_BODY = 1024 * 1024
 MAX_AUDIO_BODY = 12 * 1024 * 1024
 
+# The wake-phrase jingle. "youtube" needs no setup and ships nothing — the
+# browser embeds the official video client-side, nothing is stored here.
+# "local" streams a file YOU already own from this machine; "off" disables it.
+# No audio file is ever bundled with this repo — that would mean redistributing
+# someone else's copyrighted recording, which this project isn't going to do.
+WAKE_SONG_SOURCE = env("WAKE_SONG_SOURCE", "youtube").strip().lower()
+WAKE_SONG_YOUTUBE_ID = env("WAKE_SONG_YOUTUBE_ID", "xMaE6toi4mk").strip()
+WAKE_SONG_LOCAL_PATH = env("WAKE_SONG_LOCAL_PATH", "").strip()
+WAKE_SONG_SECONDS = int(env("WAKE_SONG_SECONDS", "105"))
+
 # The SuperMaks persona, appended to every run. Without it, the model answers as
 # a coding agent and narrates its own tooling — which is not what you want spoken
 # out loud. Edit persona.md to change how it talks.
@@ -140,6 +150,12 @@ class Handler(BaseHTTPRequestHandler):
                 stt=vs, tts=vs,
                 mac_enabled=mac.configured(),
                 mac_host=mac.HOST,
+                wake_song=dict(
+                    source=WAKE_SONG_SOURCE,
+                    youtube_id=WAKE_SONG_YOUTUBE_ID if WAKE_SONG_SOURCE == "youtube" else "",
+                    local_ready=bool(WAKE_SONG_LOCAL_PATH) and pathlib.Path(WAKE_SONG_LOCAL_PATH).is_file(),
+                    seconds=WAKE_SONG_SECONDS,
+                ),
                 session=SESSION["id"]))
 
         if p == "/api/jobs":
@@ -154,6 +170,17 @@ class Handler(BaseHTTPRequestHandler):
             if not self._token_ok():
                 return self._json({"error": "unauthorized"}, 401)
             return self._json(mac.status())
+
+        if p == "/api/wake-song":
+            if not self._token_ok():
+                return self._json({"error": "unauthorized"}, 401)
+            if WAKE_SONG_SOURCE != "local" or not WAKE_SONG_LOCAL_PATH:
+                return self._json({"error": "no local wake song configured"}, 404)
+            f = pathlib.Path(WAKE_SONG_LOCAL_PATH)
+            if not f.is_file():
+                return self._json({"error": "WAKE_SONG_LOCAL_PATH does not exist"}, 404)
+            ctype = mimetypes.guess_type(f.name)[0] or "audio/mpeg"
+            return self._bytes(f.read_bytes(), ctype)
 
         if p == "/api/mac/approvals":
             if not self._token_ok():
@@ -330,6 +357,7 @@ def main():
   permission   {perm}{perm_note}
   voice        {vo} + browser Web Speech fallback
   mac bridge   {mac.summary()}
+  wake song    {WAKE_SONG_SOURCE}{(' · ' + WAKE_SONG_YOUTUBE_ID) if WAKE_SONG_SOURCE == 'youtube' else ''}
   open         http://localhost:{PORT}
 
   Viewing from the Mac? Do not expose this port. From the Mac run:
