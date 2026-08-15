@@ -913,7 +913,6 @@ async function transmit(message, options = {}){
   $('#response').innerHTML = '<span class="cur"></span>';
   $('#stop').hidden = false;
   setSubtitle('');
-  revealTranscript();
   log('run','RUN',`${id} · ${message.slice(0,70)}`);
 
   const t0 = performance.now();
@@ -959,7 +958,6 @@ async function transmit(message, options = {}){
   clearInterval(tick);
   await speakDone;
   setSubtitle('');
-  releaseTranscript();
 }
 
 function handleEvent(ev){
@@ -1962,8 +1960,6 @@ async function shipPTT(){
    CSS owns all the motion and there's no layout thrash. */
 
 const DRAWERS = ['left', 'right', 'bottom'];
-let bottomPinned = false;
-
 function drawerOpen(side){ return ROOT_EL.classList.contains('open-' + side); }
 
 function setDrawer(side, open){
@@ -1988,11 +1984,6 @@ $('#hRight').onclick  = () => toggleDrawer('right');
 $('#hBottom').onclick = () => toggleDrawer('bottom');
 $$('[data-close]').forEach(b => { b.onclick = () => setDrawer(b.dataset.close, false); });
 
-$('#pinBottom').onclick = e => {
-  bottomPinned = !bottomPinned;
-  e.currentTarget.classList.toggle('on', bottomPinned);
-};
-
 // The reactor is the whole interface — clicking it starts and stops voice.
 $('#reactorWrap').onclick = () => { if (!dormantOn) micToggle(); };
 
@@ -2004,25 +1995,10 @@ document.addEventListener('keydown', e => {
   if (e.key === '3'){ e.preventDefault(); toggleDrawer('bottom'); }
 });
 
-/* The transcript drawer reveals itself while SuperMaks is answering, then
-   gets out of the way again — unless it's pinned, or you opened it yourself. */
-let autoOpenedBottom = false, bottomHideTimer = null;
-
-function revealTranscript(){
-  if (bottomPinned || drawerOpen('bottom')) return;
-  autoOpenedBottom = true;
-  setDrawer('bottom', true);
-}
-function releaseTranscript(){
-  clearTimeout(bottomHideTimer);
-  if (!autoOpenedBottom || bottomPinned) return;
-  bottomHideTimer = setTimeout(() => {
-    if (autoOpenedBottom && !bottomPinned && !running){
-      setDrawer('bottom', false);
-      autoOpenedBottom = false;
-    }
-  }, 6000);
-}
+/* The transcript never opens on its own — nothing but the reactor is ever on
+   screen unless you asked for it. What SuperMaks is saying still shows as the
+   single caption line under the reactor; the drawer is only for reading the
+   whole reply back, and you open it deliberately (handle, or 3). */
 
 /* One line of what's being said, under the reactor. The full text lives in
    the transcript drawer; this is just enough to follow along at a glance. */

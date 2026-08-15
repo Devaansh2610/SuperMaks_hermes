@@ -153,13 +153,20 @@ button{ font-family:inherit; }
   letter-spacing:.16em; color:var(--ink-dim); text-transform:uppercase;
   min-height:11px;
 }
+/* Overlaid rather than stacked under the reactor: in the layout flow it stole
+   height from the reactor and collided with the transcript handle. As a pill
+   it floats clear of both and stays readable over the housing. */
 #subtitle{
-  pointer-events:none; max-width:min(760px,86vw); text-align:center;
-  font:400 clamp(13px,1.5vw,17px)/1.55 var(--sans); color:var(--ink);
-  text-shadow:0 2px 20px #000; min-height:1.55em;
-  opacity:0; transform:translateY(6px); transition:.4s var(--ease);
+  position:absolute; left:50%; bottom:6vh; transform:translateX(-50%) translateY(6px);
+  pointer-events:none; max-width:min(720px,84vw); text-align:center;
+  padding:9px 20px; border-radius:100px;
+  background:rgba(4,6,11,.74); border:1px solid var(--line);
+  backdrop-filter:blur(8px);
+  font:400 clamp(12.5px,1.4vw,16px)/1.5 var(--sans); color:var(--ink);
+  text-shadow:0 2px 18px #000;
+  opacity:0; transition:opacity .4s var(--ease), transform .4s var(--ease);
 }
-#subtitle.on{ opacity:1; transform:none; }
+#subtitle.on{ opacity:1; transform:translateX(-50%) translateY(0); }
 
 /* ── edge handles ───────────────────────────────────────── */
 .handle{
@@ -695,7 +702,6 @@ button{ font-family:inherit; }
       <span class="rtag" id="rtag">idle</span>
       <span class="dh-spacer"></span>
       <span class="dh-sub" id="latency"></span>
-      <button class="pin" id="pinBottom" title="Keep open">PIN</button>
       <button class="dclose" data-close="bottom">✕</button>
     </header>
     <div class="rbody" id="response"><span class="placeholder">Standing by.</span></div>
@@ -1654,7 +1660,6 @@ async function transmit(message, options = {}){
   $('#response').innerHTML = '<span class="cur"></span>';
   $('#stop').hidden = false;
   setSubtitle('');
-  revealTranscript();
   log('run','RUN',`${id} · ${message.slice(0,70)}`);
 
   const t0 = performance.now();
@@ -1700,7 +1705,6 @@ async function transmit(message, options = {}){
   clearInterval(tick);
   await speakDone;
   setSubtitle('');
-  releaseTranscript();
 }
 
 function handleEvent(ev){
@@ -2703,8 +2707,6 @@ async function shipPTT(){
    CSS owns all the motion and there's no layout thrash. */
 
 const DRAWERS = ['left', 'right', 'bottom'];
-let bottomPinned = false;
-
 function drawerOpen(side){ return ROOT_EL.classList.contains('open-' + side); }
 
 function setDrawer(side, open){
@@ -2729,11 +2731,6 @@ $('#hRight').onclick  = () => toggleDrawer('right');
 $('#hBottom').onclick = () => toggleDrawer('bottom');
 $$('[data-close]').forEach(b => { b.onclick = () => setDrawer(b.dataset.close, false); });
 
-$('#pinBottom').onclick = e => {
-  bottomPinned = !bottomPinned;
-  e.currentTarget.classList.toggle('on', bottomPinned);
-};
-
 // The reactor is the whole interface — clicking it starts and stops voice.
 $('#reactorWrap').onclick = () => { if (!dormantOn) micToggle(); };
 
@@ -2745,25 +2742,10 @@ document.addEventListener('keydown', e => {
   if (e.key === '3'){ e.preventDefault(); toggleDrawer('bottom'); }
 });
 
-/* The transcript drawer reveals itself while SuperMaks is answering, then
-   gets out of the way again — unless it's pinned, or you opened it yourself. */
-let autoOpenedBottom = false, bottomHideTimer = null;
-
-function revealTranscript(){
-  if (bottomPinned || drawerOpen('bottom')) return;
-  autoOpenedBottom = true;
-  setDrawer('bottom', true);
-}
-function releaseTranscript(){
-  clearTimeout(bottomHideTimer);
-  if (!autoOpenedBottom || bottomPinned) return;
-  bottomHideTimer = setTimeout(() => {
-    if (autoOpenedBottom && !bottomPinned && !running){
-      setDrawer('bottom', false);
-      autoOpenedBottom = false;
-    }
-  }, 6000);
-}
+/* The transcript never opens on its own — nothing but the reactor is ever on
+   screen unless you asked for it. What SuperMaks is saying still shows as the
+   single caption line under the reactor; the drawer is only for reading the
+   whole reply back, and you open it deliberately (handle, or 3). */
 
 /* One line of what's being said, under the reactor. The full text lives in
    the transcript drawer; this is just enough to follow along at a glance. */

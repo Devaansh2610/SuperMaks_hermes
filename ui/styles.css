@@ -148,13 +148,20 @@ body.open-bottom #stage{ transform:translateY(-15%) scale(.86); }
   letter-spacing:.16em; color:var(--ink-dim); text-transform:uppercase;
   min-height:11px;
 }
+/* Overlaid rather than stacked under the reactor: in the layout flow it stole
+   height from the reactor and collided with the transcript handle. As a pill
+   it floats clear of both and stays readable over the housing. */
 #subtitle{
-  pointer-events:none; max-width:min(760px,86vw); text-align:center;
-  font:400 clamp(13px,1.5vw,17px)/1.55 var(--sans); color:var(--ink);
-  text-shadow:0 2px 20px #000; min-height:1.55em;
-  opacity:0; transform:translateY(6px); transition:.4s var(--ease);
+  position:absolute; left:50%; bottom:6vh; transform:translateX(-50%) translateY(6px);
+  pointer-events:none; max-width:min(720px,84vw); text-align:center;
+  padding:9px 20px; border-radius:100px;
+  background:rgba(4,6,11,.74); border:1px solid var(--line);
+  backdrop-filter:blur(8px);
+  font:400 clamp(12.5px,1.4vw,16px)/1.5 var(--sans); color:var(--ink);
+  text-shadow:0 2px 18px #000;
+  opacity:0; transition:opacity .4s var(--ease), transform .4s var(--ease);
 }
-#subtitle.on{ opacity:1; transform:none; }
+#subtitle.on{ opacity:1; transform:translateX(-50%) translateY(0); }
 
 /* ── edge handles ───────────────────────────────────────── */
 .handle{
