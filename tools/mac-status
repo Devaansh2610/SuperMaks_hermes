@@ -1,0 +1,45 @@
+#!/usr/bin/env bash
+# One-glance state of the Mac. Also the fastest way to tell whether the bridge
+# and its macOS permissions are actually working.
+set -uo pipefail
+. "$(dirname "$0")/mac-lib.sh"
+
+if ! mac_run true 2>/dev/null; then
+  printf 'Mac unreachable at %s.\n' "$MAC_SSH_HOST" >&2
+  printf 'Check Remote Login on the Mac, and that both machines are on the same network.\n' >&2
+  exit 1
+fi
+
+read -r -d '' probe <<'PROBE' || true
+printf 'host       %s\n' "$(scutil --get ComputerName 2>/dev/null)"
+printf 'macos      %s\n' "$(sw_vers -productVersion 2>/dev/null)"
+printf 'uptime     %s\n' "$(uptime | sed 's/.*up //; s/,[[:space:]]*[0-9]* user.*//')"
+printf 'load       %s\n' "$(sysctl -n vm.loadavg 2>/dev/null | tr -d '{}' | awk '{print $1}')"
+printf 'disk free  %s\n' "$(df -h / | tail -1 | awk '{print $4}')"
+printf 'battery    %s %s\n' \
+  "$(pmset -g batt | grep -Eo '[0-9]+%' | head -1)" \
+  "$(pmset -g batt | head -1 | sed -n "s/.*'\(.*\)'.*/\1/p")"
+printf 'volume     %s\n' "$(osascript -e 'output volume of (get volume settings)' 2>/dev/null)"
+
+front=$(osascript -e 'tell application "System Events" to get name of first application process whose frontmost is true' 2>/dev/null)
+if [ -n "$front" ]; then
+  printf 'front app  %s\n' "$front"
+else
+  printf 'front app  BLOCKED - grant Accessibility + Automation to sshd-keygen-wrapper\n'
+fi
+
+if screencapture -x /tmp/mac-status-probe.jpg 2>/dev/null; then
+  rm -f /tmp/mac-status-probe.jpg
+  printf 'screen     capturable\n'
+else
+  printf 'screen     BLOCKED - grant Screen Recording to sshd-keygen-wrapper\n'
+fi
+
+if command -v cliclick >/dev/null 2>&1; then
+  printf 'cliclick   installed\n'
+else
+  printf 'cliclick   missing - brew install cliclick\n'
+fi
+PROBE
+
+mac_script "$probe"

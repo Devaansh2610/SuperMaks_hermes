@@ -1,0 +1,32 @@
+#!/usr/bin/env bash
+# Screenshot the Mac and pull the image back to this machine.
+#   mac-shot                    -> /tmp/mac-shot.jpg
+#   mac-shot ~/look.jpg
+#
+# Prints the local path, so the agent can hand it straight to a vision tool.
+set -uo pipefail
+. "$(dirname "$0")/mac-lib.sh"
+
+out="${1:-/tmp/mac-shot.jpg}"
+px="${MAC_SHOT_PX:-1400}"
+
+read -r -d '' remote <<PROBE || true
+f=/tmp/mac-shot-raw.jpg
+s=/tmp/mac-shot-small.jpg
+screencapture -x -t jpg "\$f" 2>/dev/null || exit 1
+sips -Z $px "\$f" --out "\$s" >/dev/null 2>&1 || cp "\$f" "\$s"
+openssl base64 -A -in "\$s"
+rm -f "\$f" "\$s"
+PROBE
+
+if ! b64="$(mac_script "$remote")" || [ -z "$b64" ]; then
+  printf 'Could not capture the Mac screen.\n' >&2
+  mac_gui_hint
+  exit 1
+fi
+
+printf '%s' "$b64" | base64 -d > "$out" 2>/dev/null || {
+  printf 'The Mac returned something that was not an image.\n' >&2
+  exit 1
+}
+printf '%s\n' "$out"

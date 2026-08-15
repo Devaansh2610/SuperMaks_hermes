@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+# Run a shell command on the Mac.
+#   mac-sh "ls ~/Downloads | head"
+#   mac-sh sw_vers
+set -uo pipefail
+. "$(dirname "$0")/mac-lib.sh"
+
+mac_need_arg "${1:-}" '<command…>'
+mac_run "$*"

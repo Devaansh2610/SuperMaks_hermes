@@ -1,0 +1,59 @@
+#!/usr/bin/env bash
+# Press a key combination on the Mac.
+#   mac-key cmd+t          new tab
+#   mac-key cmd+shift+4    screenshot selection
+#   mac-key return
+#   mac-key esc
+set -uo pipefail
+. "$(dirname "$0")/mac-lib.sh"
+
+mac_need_arg "${1:-}" '<combo>  e.g. cmd+shift+t, return, esc, up'
+
+combo="$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')"
+
+mods=""
+key=""
+IFS='+' read -ra parts <<< "$combo"
+for part in "${parts[@]}"; do
+  case "$part" in
+    cmd|command)      mods="$mods, command down" ;;
+    ctrl|control)     mods="$mods, control down" ;;
+    alt|opt|option)   mods="$mods, option down" ;;
+    shift)            mods="$mods, shift down" ;;
+    *)                key="$part" ;;
+  esac
+done
+mods="${mods#, }"
+using=""
+[ -n "$mods" ] && using=" using {$mods}"
+
+# Keys with no printable character have to go through `key code` instead of
+# `keystroke`. These are the standard macOS virtual key codes.
+case "$key" in
+  return|enter)  action="key code 36$using" ;;
+  tab)           action="key code 48$using" ;;
+  space)         action="key code 49$using" ;;
+  delete|back)   action="key code 51$using" ;;
+  esc|escape)    action="key code 53$using" ;;
+  left)          action="key code 123$using" ;;
+  right)         action="key code 124$using" ;;
+  down)          action="key code 125$using" ;;
+  up)            action="key code 126$using" ;;
+  home)          action="key code 115$using" ;;
+  end)           action="key code 119$using" ;;
+  pageup)        action="key code 116$using" ;;
+  pagedown)      action="key code 121$using" ;;
+  f1)  action="key code 122$using" ;;
+  f2)  action="key code 120$using" ;;
+  f3)  action="key code 99$using" ;;
+  f4)  action="key code 118$using" ;;
+  f5)  action="key code 96$using" ;;
+  f6)  action="key code 97$using" ;;
+  "")  mac_die "no key in combo: $1" ;;
+  *)   action="keystroke \"$key\"$using" ;;
+esac
+
+if ! mac_osa "tell application \"System Events\" to $action"; then
+  mac_gui_hint
+  exit 1
+fi

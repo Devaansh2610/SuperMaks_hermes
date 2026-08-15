@@ -1,0 +1,6 @@
+# This repo is authored on one OS and run on another. A CRLF that sneaks into a
+# shell script becomes `bash: \r: command not found` on the Linux machine, which
+# is a genuinely baffling error to debug. Pin everything to LF.
+* text=auto eol=lf
+*.png binary
+*.jpg binary

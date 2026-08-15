@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+# Run AppleScript on the Mac. This is the main lever for controlling apps.
+#   mac-osa 'tell application "Safari" to open location "https://example.com"'
+#   mac-osa 'tell application "Notes" to make new note with properties {body:"hi"}'
+set -uo pipefail
+. "$(dirname "$0")/mac-lib.sh"
+
+mac_need_arg "${1:-}" "'<applescript>'"
+if ! mac_osa "$*"; then
+  mac_gui_hint
+  exit 1
+fi

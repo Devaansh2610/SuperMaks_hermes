@@ -1,0 +1,9 @@
+.env
+state.json
+.no-mcp.json
+__pycache__/
+*.pyc
+*.log
+/tmp/
+id_*
+*.pem

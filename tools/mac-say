@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+# Speak out of the Mac's own speakers. Useful when the user is at the Mac and
+# the dashboard is on the other machine.
+#   mac-say "Your build finished."
+set -uo pipefail
+. "$(dirname "$0")/mac-lib.sh"
+
+mac_need_arg "${1:-}" '<text>'
+mac_run "say $(mac_q "$*")"
