@@ -229,10 +229,18 @@ To keep it up automatically, save this as
 
 ## The wake phrase
 
-Say **"wake up daddy's home"** at the dormant screen and, once a day, SuperMaks
-wakes and runs `/briefing`: a live check of your mail and calendar, opened with
-"Welcome home, sir," followed by one dry aside about whatever's actually on
-today's calendar, then an offer — never an action — on the emails.
+The HUD opens dormant — near-black, a slow breathing mark, nothing else — on
+every launch, and again after `WAKE_IDLE_HOURS` (default 4.5) of no prompt, so
+a laptop left running all day drops back into "asleep, waiting to be woken" on
+its own rather than staying lit forever.
+
+Say **"wake up daddy's home"** at that screen and SuperMaks wakes and runs
+`/briefing`: a live check of your mail and calendar, opened with "Welcome home,
+sir," followed by one dry aside about whatever's actually on today's calendar,
+then an offer — never an action — on the emails. Two fallbacks if the mic
+doesn't catch it: tap the dormant screen, or long-press Control — the same key
+that drives push-to-talk once you're awake doubles as the keyboard wake trigger
+while dormant.
 
 Between hearing the phrase and answering, it plays **"Should I Stay or Should
 I Go" by The Clash**, from the top, for up to `WAKE_SONG_SECONDS` (default
@@ -267,21 +275,27 @@ date changes — see the *Voice-first* behavior below for the mechanics.
 
 ## Voice-first: wake phrase, briefing, push-to-talk
 
-The HUD boots into a near-black **dormant** screen once a day — no HUD, no
-lines, just a slow breathing mark — and listens, locally in the browser, only
+The HUD boots into **dormant** — no HUD, no lines, just a slow breathing mark
+on black — every time it's opened, and listens, locally in the browser, only
 for the wake phrase. It never touches Fish Audio for this: streaming your mic
-to a paid endpoint all day to catch one phrase would be slow and wasteful, and
-the browser's own recognizer does it for free. Say the phrase (or tap the
-screen as a failsafe) and it fires `/briefing`, marks today done, and the wake
-listener stays off until the date rolls over — checked against `localStorage`,
-so a reload won't re-trigger it, and a tab left open past midnight self-rearms.
+to a paid endpoint continuously to catch one phrase would be slow and
+wasteful, and the browser's own recognizer does it for free, running only
+while dormant rather than all the time in between.
 
-For everything else that day, **long-press Control** — 320ms, so a stray tap
-does nothing — arms the mic for push-to-talk. It stops on whichever comes
-first: releasing the key, or 220ms of silence, instead of the continuous
-conversation loop's 900ms tail. Requires a Chromium-based browser for the wake
-phrase and push-to-talk's fast path (same limitation the STT fallback already
-had); the Voice button and typing work everywhere regardless.
+Say the phrase, tap the screen, or long-press Control, and it fires
+`/briefing`. Wake-phrase listening then turns off — nothing is listening in
+the background — until `WAKE_IDLE_HOURS` passes with no prompt sent, at which
+point it re-arms itself on its own, even if the tab's been open the whole time.
+
+Once awake, the same **long-press Control** — 320ms, so a stray tap does
+nothing — becomes push-to-talk instead of a wake trigger: it arms the mic and
+stops on whichever comes first, releasing the key or 220ms of silence, instead
+of the continuous conversation loop's 900ms tail. Requires a Chromium-based
+browser for the wake phrase, the dormant screen, and Control's browser-STT
+fallback path (same limitation the STT fallback already had). Without it the
+HUD skips dormant entirely and opens straight to standby — no wake ritual, no
+Control-to-wake — but push-to-talk still works via Fish Audio if configured,
+and the Voice button and typing work everywhere regardless.
 
 ## Command matrix
 
@@ -340,6 +354,7 @@ The HUD ships no fonts and no libraries — it has to work on a machine bound to
 | `WAKE_SONG_YOUTUBE_ID` | `xMaE6toi4mk` | video embedded on wake |
 | `WAKE_SONG_LOCAL_PATH` | — | a file you own, used when source is `local` |
 | `WAKE_SONG_SECONDS` | `105` | how long the jingle plays before it's cut |
+| `WAKE_IDLE_HOURS` | `4.5` | hours of no prompt before dormant mode re-arms itself |
 | `MAC_ENABLED` | `1` | switch the Mac bridge off entirely |
 | `MAC_SSH_HOST` | `mac` | ssh alias or `user@host` |
 | `MAC_SHOT_PX` | `1100` | screenshot long edge |

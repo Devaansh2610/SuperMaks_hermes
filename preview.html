@@ -1137,6 +1137,7 @@ async function transmit(message, options = {}){
     log('note','BUSY',`still working — "${message.slice(0,40)}" not sent. Wait, or press Esc.`);
     return;
   }
+  lastActivity = Date.now();       // restarts the idle clock that re-arms dormant mode
   running = true; answer = ''; gotFirstDelta = false;
   speakThisRun = options.speak !== false;
 
@@ -1800,6 +1801,7 @@ async function loadStatus(){
   RT.browserStt = !!SpeechRecognition;
   RT.browserTts = !!speechSynth;
   if (s.wake_song) WAKE_SONG = s.wake_song;
+  if (s.wake_idle_hours) WAKE_IDLE_MS = s.wake_idle_hours * 60 * 60 * 1000;
 
   const hermes = s.runtime === 'hermes';
   pill('#pillBrain',  hermes ? 'ok' : 'bad', hermes ? 'Hermes' : 'offline');
@@ -1845,29 +1847,27 @@ setInterval(async () => {
 }, 4000);
 
 /* ══════════════ 10b. the wake phrase ══════════════
-   Once a day, the HUD boots into "dormant" — near-black, a slow breathing
-   mark, nothing else — and runs a background speech recognizer listening only
-   for the wake phrase. Say it, and the daily briefing runs. After that, wake-
-   phrase listening turns off until the calendar date changes; every other
-   activation that day goes through push-to-talk (long-press Control) or the
-   Voice button instead.
+   The HUD boots into "dormant" every time it's opened — near-black, a slow
+   breathing mark, nothing else — and runs a background speech recognizer
+   listening only for the wake phrase. It re-arms itself the same way after
+   WAKE_IDLE_MS of no prompt, so a laptop left running all day drops back into
+   "asleep, waiting to be woken" on its own. Two ways in if the mic doesn't
+   catch it: tap the dormant screen, or long-press Control — the same key that
+   drives push-to-talk once you're already awake does double duty as the
+   keyboard fallback for waking up.
 
    This deliberately never touches Fish Audio — streaming the mic to a paid
-   STT endpoint all day just to catch one phrase would be both slow and not
-   free. The browser's own recognizer is free and already running locally. */
+   STT endpoint continuously just to catch one phrase would be both slow and
+   not free. The browser's own recognizer is free and already running
+   locally; it only runs while dormant, not all the time in between. */
 
 const WAKE_PHRASE = /\bwake\s*up\b[\s\S]{0,24}\bdad(?:dy)?'?s?\b[\s\S]{0,24}\bhome\b/i;
-const WAKE_STORE_KEY = 'supermaks.lastWakeDate';
+// How long without a prompt before the HUD drops back into dormant. Overridable
+// server-side via WAKE_IDLE_HOURS in .env; this is just the pre-status default.
+let WAKE_IDLE_MS = 4.5 * 60 * 60 * 1000;
 
-let dormantOn = false, wakeActive = false, wakeRecognition = null;
-
-const today = () => new Date().toDateString();
-function alreadyWokenToday(){
-  try { return localStorage.getItem(WAKE_STORE_KEY) === today(); } catch(_){ return false; }
-}
-function markWoken(){
-  try { localStorage.setItem(WAKE_STORE_KEY, today()); } catch(_){}
-}
+let dormantOn = false, waking = false, wakeActive = false, wakeRecognition = null;
+let lastActivity = Date.now();
 
 function enterDormant(){
   if (!SpeechRecognition){
@@ -1920,13 +1920,14 @@ function armWakeRecognizer(){
 }
 
 function handleWake(){
-  if (!dormantOn) return;
-  markWoken();
+  if (!dormantOn || waking) return;
+  waking = true;                   // holds off the idle re-arm mid-sequence
   exitDormant();
   log('voice','WAKE','wake phrase heard');
   setTimeout(async () => {
     await playWakeSong();          // resolves quickly on its own if blocked, off, or skipped
-    transmit('/briefing');
+    waking = false;
+    transmit('/briefing');         // this also stamps lastActivity, restarting the idle clock
   }, 650);                         // let the exit animation clear first
 }
 
@@ -2024,9 +2025,10 @@ function playWakeSong(){
 // A tap on the dormant screen is the failsafe if the mic never catches it.
 $('#dormant').addEventListener('click', handleWake);
 
-// If the tab is left open across midnight, re-arm without needing a reload.
+// Re-arm dormant mode after a long enough silence, without needing a reload.
 setInterval(() => {
-  if (!dormantOn && !running && !convo && !pttArmed && !alreadyWokenToday()) enterDormant();
+  if (SpeechRecognition && !dormantOn && !waking && !running && !convo && !pttArmed
+      && Date.now() - lastActivity >= WAKE_IDLE_MS) enterDormant();
 }, 5 * 60 * 1000);
 
 /* ══════════════ 10c. push-to-talk — long-press Control ══════════════
@@ -2034,7 +2036,11 @@ setInterval(() => {
    you release the key OR the instant you stop talking, whichever comes
    first — no 900ms silence tax like the continuous conversation loop uses.
    A tap that doesn't clear the threshold does nothing, so it can't be
-   triggered by an accidental brush of the key. */
+   triggered by an accidental brush of the key.
+
+   Same key, second job: if the HUD is dormant when Control is long-pressed,
+   it wakes instead of arming the mic — the keyboard fallback for whenever the
+   wake phrase doesn't land (background noise, a cold, whatever). */
 
 const PTT_HOLD_MS = 320;      // how long Control must be held to count as a long-press
 const PTT_SILENCE_MS = 220;   // near-instant endpointing once armed
@@ -2047,8 +2053,12 @@ let pttThreshold = 0.02, pttCalibrating = true, pttFloorSum = 0, pttFloorN = 0;
 
 document.addEventListener('keydown', e => {
   if (e.key !== 'Control' || e.repeat) return;
-  if (dormantOn || running || convo || pttArmed || pttTimer) return;
-  pttTimer = setTimeout(startPTT, PTT_HOLD_MS);
+  if (running || waking || pttArmed || pttTimer) return;
+  if (!dormantOn && convo) return;                // already listening continuously
+  pttTimer = setTimeout(() => {
+    pttTimer = null;
+    if (dormantOn) handleWake(); else startPTT();
+  }, PTT_HOLD_MS);
 });
 document.addEventListener('keyup', e => {
   if (e.key !== 'Control') return;
@@ -2064,7 +2074,7 @@ window.addEventListener('blur', () => {
 
 async function startPTT(){
   pttTimer = null;
-  if (dormantOn || running || convo) return;
+  if (dormantOn || running || convo || waking) return;
   micButton(true, 'Listening');
   setState('listening','listening…');
 
@@ -2221,8 +2231,8 @@ function bootSequence(){
 
   document.getElementById('smRoot').classList.remove('state-boot');
 
-  if (alreadyWokenToday()) setState('standby','awaiting uplink');
-  else enterDormant();
+  lastActivity = Date.now();       // boot itself starts the idle clock fresh
+  enterDormant();                  // dormant on every launch — see enterDormant() for the fallback
 
   if (RT.mac){
     pollMac(); grabScreenshot();
@@ -2249,6 +2259,7 @@ function mockFetch(url, opts = {}){
     stt:'fish', tts:'fish', voice_model:'s2.1-pro-free', voice_id:'612b878b113047d9a770c069c8b4fdfe',
     mac_enabled:true, mac_host:'mac', session:null,
     wake_song:{source:'youtube', youtube_id:'xMaE6toi4mk', local_ready:false, seconds:105},
+    wake_idle_hours:4.5,
   });
 
   if (url === '/api/mac') return json({

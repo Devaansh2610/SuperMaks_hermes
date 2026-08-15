@@ -60,6 +60,11 @@ WAKE_SONG_YOUTUBE_ID = env("WAKE_SONG_YOUTUBE_ID", "xMaE6toi4mk").strip()
 WAKE_SONG_LOCAL_PATH = env("WAKE_SONG_LOCAL_PATH", "").strip()
 WAKE_SONG_SECONDS = int(env("WAKE_SONG_SECONDS", "105"))
 
+# The HUD goes dormant (wake-phrase-only) on every launch, and re-arms itself
+# after this many hours with no prompt — so a laptop left running all day
+# drops back into "asleep, waiting to be woken" on its own.
+WAKE_IDLE_HOURS = float(env("WAKE_IDLE_HOURS", "4.5"))
+
 # The SuperMaks persona, appended to every run. Without it, the model answers as
 # a coding agent and narrates its own tooling — which is not what you want spoken
 # out loud. Edit persona.md to change how it talks.
@@ -156,6 +161,7 @@ class Handler(BaseHTTPRequestHandler):
                     local_ready=bool(WAKE_SONG_LOCAL_PATH) and pathlib.Path(WAKE_SONG_LOCAL_PATH).is_file(),
                     seconds=WAKE_SONG_SECONDS,
                 ),
+                wake_idle_hours=WAKE_IDLE_HOURS,
                 session=SESSION["id"]))
 
         if p == "/api/jobs":
@@ -358,6 +364,7 @@ def main():
   voice        {vo} + browser Web Speech fallback
   mac bridge   {mac.summary()}
   wake song    {WAKE_SONG_SOURCE}{(' · ' + WAKE_SONG_YOUTUBE_ID) if WAKE_SONG_SOURCE == 'youtube' else ''}
+  wake idle    dormant on launch, and again after {WAKE_IDLE_HOURS}h with no prompt
   open         http://localhost:{PORT}
 
   Viewing from the Mac? Do not expose this port. From the Mac run:
