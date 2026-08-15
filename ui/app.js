@@ -164,44 +164,92 @@ function rmsOf(analyser){
   return Math.sqrt(s / buf.length);
 }
 /* ══════════════ 4. the reactor ══════════════
-   A Mark-II-style arc reactor, drawn on canvas. Anatomy, centre outward:
+   A working machine rather than a picture of one. Anatomy, rim inward:
 
-     plasma torus → containment rim → coil pack (10 windings) → segmented
-     bezel → counter-rotating gimbal rings → audio spectrum → machined
-     housing with bolts → bloom
+     knurled rim · machined housing with bolts · 16 reciprocating actuators ·
+     outer ring gear · counter-rotating engraved data ring · 7 orbiting
+     planetary gears meshed to the ring gear · sequencing status LEDs ·
+     gimbal arcs · audio spectrum · stepper-indexed collar · coil pack with
+     moving armature caps · tilting stator vanes · containment rim ·
+     spinning turbine · plasma torus · arc discharge
 
-   The expensive parts (brushed metal, bolt heads, coil bodies, engraved
-   graduations) never change, so they're rendered once into an offscreen
-   canvas and blitted each frame. Only light moves per frame: plasma,
-   coil energy, gimbals, arc discharge, sparks, bloom. That keeps a very
-   dense image at 60fps.
+   Anything with teeth or a repeated profile is rendered once into a small
+   offscreen sprite and then blitted rotated, so a gear costs one drawImage
+   rather than a hundred path segments per frame. The unmoving housing is
+   rendered once at full size. That's what buys enough headroom to run this
+   many mechanisms at 60fps.
 
-   Everything reactive is driven by real audio — the microphone while
-   listening, the speech playback while talking — so the reactor is an
-   instrument, not a decoration. */
+   Everything reactive is driven by real audio — microphone while listening,
+   speech playback while talking — so it reads as an instrument, not a
+   screensaver. */
 
 const reactor = (() => {
   const cv = $('#core');
   const ctx = cv.getContext('2d');
   const TAU = Math.PI * 2;
 
-  const SEG  = 10;                 // coil windings, like the Mark II
-  const BARS = 132;                // spectrum resolution
+  const SEG   = 10;    // coil windings
+  const BARS  = 96;    // spectrum resolution
+  const VANES = 28;    // stator vanes
+  const ACTS  = 16;    // actuators
+  const PLANS = 7;     // planetary gears
+  const LEDS  = 36;
+  const TURB  = 21;    // turbine blades
 
-  const spectrum = new Float32Array(BARS);
-  const coil     = new Float32Array(SEG);
+  const spectrum   = new Float32Array(BARS);
+  const coil       = new Float32Array(SEG);
   const coilTarget = new Float32Array(SEG);
 
-  const still = document.createElement('canvas');   // the machined, unmoving parts
+  const still = document.createElement('canvas');
   const sctx  = still.getContext('2d');
+  const sprite = {};                       // rotated-blit sprites
 
   let W = 0, H = 0, dpr = 1, cx = 0, cy = 0, R = 0;
   let t = 0, level = 0, raf = 0, frame = 0;
   let acc = '#37e6d0', acc2 = '#7ef4ff';
-  let bolt = [], discharge = [], sparks = [];
-  const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  let discharge = [], sparks = [];
+  let indexAngle = 0, indexNext = 0;       // stepper collar
 
-  /* deterministic value noise — same housing wear pattern every launch */
+  /* Gradients are objects the renderer has to build; rebuilding a dozen of
+     them 60 times a second is pure waste when their geometry never moves.
+     These are cached on resize, and re-tinted only when the accent changes. */
+  const grad = { coil: [], key: '' };
+
+  function buildGradients(){
+    if (R <= 8) return;
+    grad.key = acc + acc2;
+    grad.coil.length = 0;
+    const cr0 = R * .265, cr1 = R * .495;
+    for (let i = 0; i < SEG; i++){
+      const a = i / SEG * TAU - Math.PI / 2;
+      const gx = cx + Math.cos(a) * cr0, gy = cy + Math.sin(a) * cr0;
+      const g = ctx.createRadialGradient(gx, gy, 0, gx, gy, (cr1 - cr0) * .95);
+      g.addColorStop(0, acc2); g.addColorStop(.22, acc); g.addColorStop(1, 'rgba(0,0,0,0)');
+      grad.coil.push(g);
+    }
+    const pr = R * .168;
+    grad.plasma = ctx.createRadialGradient(cx, cy, R * .018, cx, cy, pr * 1.5);
+    grad.plasma.addColorStop(0, 'rgba(120,190,220,.16)');
+    grad.plasma.addColorStop(.52, acc2);
+    grad.plasma.addColorStop(.72, acc);
+    grad.plasma.addColorStop(1, 'rgba(0,0,0,0)');
+    grad.plasmaR = pr * 1.5;
+
+    grad.bloom = ctx.createRadialGradient(cx, cy, R * .08, cx, cy, R * 1.1);
+    grad.bloom.addColorStop(0, acc); grad.bloom.addColorStop(.35, 'rgba(0,0,0,0)');
+
+    grad.lip = ctx.createRadialGradient(cx, cy, R * .50, cx, cy, R * .63);
+    grad.lip.addColorStop(0, 'rgba(0,0,0,.5)'); grad.lip.addColorStop(1, 'rgba(0,0,0,0)');
+
+    // ring gear body — drawn as a path each frame, so its fill lives here
+    grad.ringGear = ctx.createLinearGradient(-R, -R, R, R);
+    grad.ringGear.addColorStop(0, '#3a4756');
+    grad.ringGear.addColorStop(.5, '#1b232e');
+    grad.ringGear.addColorStop(1, '#0d131a');
+  }
+  const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const rate = reduce ? 0.12 : 1;
+
   const hash = n => { const s = Math.sin(n * 127.1) * 43758.5453; return s - Math.floor(s); };
   const noise = x => {
     const i = Math.floor(x), f = x - i, u = f * f * (3 - 2 * f);
@@ -216,23 +264,22 @@ const reactor = (() => {
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     cx = W / 2; cy = H / 2; R = Math.min(W, H) / 2;
     buildStill();
+    buildSprites();
+    buildGradients();
   }
   new ResizeObserver(resize).observe(cv);
 
-  /* ── the unmoving machine ─────────────────────────────── */
+  /* ── helpers ──────────────────────────────────────────── */
 
-  function ring(g, r0, r1){
+  function ring(g, r0, r1, ox = cx, oy = cy){
     g.beginPath();
-    g.arc(cx, cy, r1, 0, TAU);
-    g.arc(cx, cy, r0, TAU, 0, true);
+    g.arc(ox, oy, r1, 0, TAU);
+    g.arc(ox, oy, r0, TAU, 0, true);
     g.closePath();
   }
 
-  /* Brushed metal: hundreds of thin radial wedges at varying lightness,
-     then a directional light pass so it reads as a lit physical surface
-     rather than flat noise. */
   function brushed(g, r0, r1, lightness, spread){
-    const steps = 420;
+    const steps = 460;
     for (let i = 0; i < steps; i++){
       const a0 = i / steps * TAU, a1 = (i + 1.4) / steps * TAU;
       const n = noise(i * 0.09) * 0.6 + noise(i * 0.47) * 0.4;
@@ -242,44 +289,136 @@ const reactor = (() => {
       g.arc(cx, cy, r0, a1, a0, true);
       g.closePath(); g.fill();
     }
-    // light from upper-left, shadow lower-right
     g.save(); ring(g, r0, r1); g.clip();
     const lg = g.createLinearGradient(cx - r1, cy - r1, cx + r1, cy + r1);
-    lg.addColorStop(0,   'rgba(255,255,255,.16)');
+    lg.addColorStop(0,   'rgba(255,255,255,.17)');
     lg.addColorStop(.42, 'rgba(255,255,255,.02)');
-    lg.addColorStop(.62, 'rgba(0,0,0,.16)');
-    lg.addColorStop(1,   'rgba(0,0,0,.42)');
+    lg.addColorStop(.62, 'rgba(0,0,0,.17)');
+    lg.addColorStop(1,   'rgba(0,0,0,.45)');
     g.fillStyle = lg; g.fillRect(cx - r1, cy - r1, r1 * 2, r1 * 2);
     g.restore();
-    // machined bevel edges
-    g.lineWidth = Math.max(1, R * 0.004);
-    g.strokeStyle = 'rgba(255,255,255,.10)';
+    g.lineWidth = Math.max(1, R * .003);
+    g.strokeStyle = 'rgba(255,255,255,.11)';
     g.beginPath(); g.arc(cx, cy, r1, 0, TAU); g.stroke();
-    g.strokeStyle = 'rgba(0,0,0,.55)';
+    g.strokeStyle = 'rgba(0,0,0,.6)';
     g.beginPath(); g.arc(cx, cy, r0, 0, TAU); g.stroke();
   }
 
-  function boltHead(g, a, r, rad){
-    const x = cx + Math.cos(a) * r, y = cy + Math.sin(a) * r;
-    const bg = g.createRadialGradient(x - rad * .4, y - rad * .4, rad * .1, x, y, rad);
-    bg.addColorStop(0, '#5d6c7d'); bg.addColorStop(.5, '#333e4c'); bg.addColorStop(1, '#141a22');
-    g.fillStyle = bg;
-    g.beginPath(); g.arc(x, y, rad, 0, TAU); g.fill();
-    g.strokeStyle = 'rgba(0,0,0,.6)'; g.lineWidth = Math.max(1, rad * .12);
-    g.beginPath(); g.arc(x, y, rad, 0, TAU); g.stroke();
-    // hex socket
-    g.fillStyle = 'rgba(0,0,0,.62)';
+  /* one gear, centred in its own sprite so it can be blitted rotated */
+  /* SPRITE_DPR under-renders the rotating sprites and lets the blit upscale
+     them. A rotated drawImage costs per destination pixel, and these are the
+     two largest things drawn each frame — half resolution is roughly a
+     quarter of the cost, and a gear silhouette carries the softening well. */
+  const SPRITE_DPR = 1;
+
+  function gearSprite(px, teeth, toothDepth, hubRatio, tint){
+    const c = document.createElement('canvas');
+    c.width = c.height = Math.ceil(px * SPRITE_DPR);
+    const g = c.getContext('2d');
+    g.setTransform(SPRITE_DPR, 0, 0, SPRITE_DPR, 0, 0);
+    const o = px / 2, rO = px / 2 - 1, rRoot = rO - toothDepth;
+
     g.beginPath();
-    for (let k = 0; k < 6; k++){
-      const ha = a + k / 6 * TAU;
-      const hx = x + Math.cos(ha) * rad * .46, hy = y + Math.sin(ha) * rad * .46;
-      k ? g.lineTo(hx, hy) : g.moveTo(hx, hy);
+    for (let i = 0; i < teeth; i++){
+      const a = i / teeth * TAU, s = TAU / teeth;
+      g.lineTo(o + Math.cos(a) * rRoot,             o + Math.sin(a) * rRoot);
+      g.lineTo(o + Math.cos(a + s * .14) * rO,      o + Math.sin(a + s * .14) * rO);
+      g.lineTo(o + Math.cos(a + s * .36) * rO,      o + Math.sin(a + s * .36) * rO);
+      g.lineTo(o + Math.cos(a + s * .5)  * rRoot,   o + Math.sin(a + s * .5)  * rRoot);
     }
-    g.closePath(); g.fill();
-    g.strokeStyle = 'rgba(255,255,255,.10)';
-    g.lineWidth = Math.max(.5, rad * .07);
-    g.beginPath(); g.arc(x, y, rad * .62, a + .6, a + 2.4); g.stroke();
+    g.closePath();
+    const gg = g.createLinearGradient(0, 0, px, px);
+    gg.addColorStop(0, tint[0]); gg.addColorStop(.5, tint[1]); gg.addColorStop(1, tint[2]);
+    g.fillStyle = gg; g.fill();
+    g.strokeStyle = 'rgba(0,0,0,.62)'; g.lineWidth = Math.max(.7, px * .012); g.stroke();
+    g.strokeStyle = 'rgba(255,255,255,.14)'; g.lineWidth = Math.max(.5, px * .006);
+    g.beginPath(); g.arc(o, o, rRoot * .92, 0, TAU); g.stroke();
+
+    // hub + spokes
+    const hub = rO * hubRatio;
+    g.fillStyle = 'rgba(0,0,0,.5)';
+    g.beginPath(); g.arc(o, o, hub, 0, TAU); g.fill();
+    g.strokeStyle = 'rgba(190,220,235,.22)'; g.lineWidth = Math.max(.7, px * .014);
+    for (let i = 0; i < 5; i++){
+      const a = i / 5 * TAU;
+      g.beginPath();
+      g.moveTo(o + Math.cos(a) * hub * .55, o + Math.sin(a) * hub * .55);
+      g.lineTo(o + Math.cos(a) * rRoot * .88, o + Math.sin(a) * rRoot * .88);
+      g.stroke();
+    }
+    g.fillStyle = '#0a0e14';
+    g.beginPath(); g.arc(o, o, hub * .42, 0, TAU); g.fill();
+    return c;
   }
+
+  /* the engraved data ring — one sprite, blitted counter-rotating */
+  function dataRingSprite(){
+    const px = Math.ceil(R * 1.52);
+    const c = document.createElement('canvas');
+    c.width = c.height = Math.ceil(px * SPRITE_DPR);
+    const g = c.getContext('2d');
+    g.setTransform(SPRITE_DPR, 0, 0, SPRITE_DPR, 0, 0);
+    const o = px / 2, rr = px / 2 - R * .026;
+    const text = '  SUPERMAKS · ARC REACTOR MK II · OUTPUT NOMINAL · CONTAINMENT STABLE · HERMES LINK ACTIVE ';
+    g.font = `600 ${Math.max(7, R * .028)}px ui-monospace, "SF Mono", Menlo, monospace`;
+    g.textAlign = 'center'; g.textBaseline = 'middle';
+    g.fillStyle = 'rgba(180,215,235,.34)';
+    const n = text.length;
+    for (let i = 0; i < n; i++){
+      const a = i / n * TAU;
+      g.save();
+      g.translate(o + Math.cos(a) * rr, o + Math.sin(a) * rr);
+      g.rotate(a + Math.PI / 2);
+      g.fillText(text[i], 0, 0);
+      g.restore();
+    }
+    return c;
+  }
+
+  function blit(img, px, angle, ox = cx, oy = cy){
+    ctx.save();
+    ctx.translate(ox, oy); ctx.rotate(angle);
+    ctx.drawImage(img, -px / 2, -px / 2, px, px);
+    ctx.restore();
+  }
+
+  function buildSprites(){
+    if (R <= 8) return;
+    // The ring gear is drawn as a path, not blitted: as a sprite it was a
+    // mostly-transparent square costing 2.5·R² destination pixels a frame,
+    // where the path only rasterizes the toothed band, about a fifth of that.
+    sprite.planet   = gearSprite(Math.ceil(R * .175), 15, R * .017, .42,
+                                 ['#4a5a68', '#28323f', '#141a23']);
+    sprite.dataRing = dataRingSprite();
+    sprite.planetPx   = R * .175;
+    sprite.dataRingPx = R * 1.52;
+  }
+
+  const RG_TEETH = 72, RG_OUT = .800, RG_ROOT = .766, RG_IN = .700;
+
+  function drawRingGear(angle){
+    ctx.save();
+    ctx.translate(cx, cy); ctx.rotate(angle);
+    const rO = R * RG_OUT, rRoot = R * RG_ROOT;
+    ctx.beginPath();
+    for (let i = 0; i < RG_TEETH; i++){
+      const a = i / RG_TEETH * TAU, s = TAU / RG_TEETH;
+      ctx.lineTo(Math.cos(a) * rRoot,           Math.sin(a) * rRoot);
+      ctx.lineTo(Math.cos(a + s * .14) * rO,    Math.sin(a + s * .14) * rO);
+      ctx.lineTo(Math.cos(a + s * .36) * rO,    Math.sin(a + s * .36) * rO);
+      ctx.lineTo(Math.cos(a + s * .5) * rRoot,  Math.sin(a + s * .5) * rRoot);
+    }
+    ctx.closePath();
+    ctx.arc(0, 0, R * RG_IN, 0, TAU, true);      // reversed → hole
+    ctx.fillStyle = grad.ringGear;
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(0,0,0,.55)';
+    ctx.lineWidth = Math.max(1, R * .0035);
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  /* ── the unmoving machine ─────────────────────────────── */
 
   function coilPath(g, i, r0, r1, pad){
     const a = i / SEG * TAU - Math.PI / 2;
@@ -295,76 +434,93 @@ const reactor = (() => {
     sctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     sctx.clearRect(0, 0, W, H);
     const g = sctx;
-    if (R <= 4) return;
+    if (R <= 8) return;
 
-    // ── outer housing
-    brushed(g, R * .795, R * .972, 19, 14);
-    // bolt ring
-    bolt = [];
-    const bn = 12, br = R * .884, brad = R * .026;
-    for (let i = 0; i < bn; i++){
-      const a = i / bn * TAU - Math.PI / 2;
-      boltHead(g, a, br, brad);
-      bolt.push(a);
-    }
-    // engraved graduations on the housing inner lip
-    g.strokeStyle = 'rgba(190,220,235,.16)';
-    for (let i = 0; i < 180; i++){
-      const a = i / 180 * TAU, major = i % 15 === 0;
-      g.lineWidth = major ? Math.max(1, R * .005) : Math.max(.5, R * .002);
-      const r0 = R * (major ? .806 : .812);
+    // knurled rim
+    brushed(g, R * .952, R * .995, 21, 10);
+    g.strokeStyle = 'rgba(0,0,0,.5)';
+    g.lineWidth = Math.max(.6, R * .0025);
+    for (let i = 0; i < 240; i++){
+      const a = i / 240 * TAU;
       g.beginPath();
-      g.moveTo(cx + Math.cos(a) * r0, cy + Math.sin(a) * r0);
-      g.lineTo(cx + Math.cos(a) * R * .828, cy + Math.sin(a) * R * .828);
+      g.moveTo(cx + Math.cos(a) * R * .955, cy + Math.sin(a) * R * .955);
+      g.lineTo(cx + Math.cos(a) * R * .993, cy + Math.sin(a) * R * .993);
       g.stroke();
     }
 
-    // ── mid bezel
-    brushed(g, R * .565, R * .60, 12, 9);
+    // main housing
+    brushed(g, R * .845, R * .950, 18, 14);
+    const bn = 16, br = R * .898, brad = R * .020;
+    for (let i = 0; i < bn; i++){
+      const a = i / bn * TAU - Math.PI / 2;
+      const x = cx + Math.cos(a) * br, y = cy + Math.sin(a) * br;
+      const bg = g.createRadialGradient(x - brad * .4, y - brad * .4, brad * .1, x, y, brad);
+      bg.addColorStop(0, '#5d6c7d'); bg.addColorStop(.5, '#333e4c'); bg.addColorStop(1, '#141a22');
+      g.fillStyle = bg;
+      g.beginPath(); g.arc(x, y, brad, 0, TAU); g.fill();
+      g.strokeStyle = 'rgba(0,0,0,.62)'; g.lineWidth = Math.max(1, brad * .13);
+      g.beginPath(); g.arc(x, y, brad, 0, TAU); g.stroke();
+      g.fillStyle = 'rgba(0,0,0,.6)';
+      g.beginPath();
+      for (let k = 0; k < 6; k++){
+        const ha = a + k / 6 * TAU;
+        const hx = x + Math.cos(ha) * brad * .46, hy = y + Math.sin(ha) * brad * .46;
+        k ? g.lineTo(hx, hy) : g.moveTo(hx, hy);
+      }
+      g.closePath(); g.fill();
+    }
+    // graduations
+    g.strokeStyle = 'rgba(190,220,235,.15)';
+    for (let i = 0; i < 240; i++){
+      const a = i / 240 * TAU, major = i % 20 === 0;
+      g.lineWidth = major ? Math.max(1, R * .0042) : Math.max(.5, R * .0017);
+      const r0 = R * (major ? .852 : .858);
+      g.beginPath();
+      g.moveTo(cx + Math.cos(a) * r0, cy + Math.sin(a) * r0);
+      g.lineTo(cx + Math.cos(a) * R * .872, cy + Math.sin(a) * R * .872);
+      g.stroke();
+    }
 
-    // ── coil pack bodies
-    const cr0 = R * .275, cr1 = R * .53;
+    // actuator channel + gear race (recessed, so moving parts sit in a slot)
+    ring(g, R * .755, R * .845); g.fillStyle = '#070b11'; g.fill();
+    ring(g, R * .700, R * .742); g.fillStyle = '#05080d'; g.fill();
+
+    // coil pack bodies
+    const cr0 = R * .265, cr1 = R * .495;
     for (let i = 0; i < SEG; i++){
-      coilPath(g, i, cr0, cr1, .034);
+      coilPath(g, i, cr0, cr1, .030);
       const a = i / SEG * TAU - Math.PI / 2;
       const gx = cx + Math.cos(a) * cr0, gy = cy + Math.sin(a) * cr0;
       const cg = g.createRadialGradient(gx, gy, cr0 * .1, cx, cy, cr1);
-      cg.addColorStop(0,   '#2a3340');
-      cg.addColorStop(.45, '#171e28');
-      cg.addColorStop(1,   '#0b1017');
+      cg.addColorStop(0, '#2c3542'); cg.addColorStop(.45, '#171e28'); cg.addColorStop(1, '#0b1017');
       g.fillStyle = cg; g.fill();
-      g.strokeStyle = 'rgba(150,190,215,.13)';
-      g.lineWidth = Math.max(1, R * .0035); g.stroke();
+      g.strokeStyle = 'rgba(150,190,215,.14)'; g.lineWidth = Math.max(1, R * .003); g.stroke();
 
-      // windings
-      g.save(); coilPath(g, i, cr0, cr1, .034); g.clip();
-      const turns = 13;
+      g.save(); coilPath(g, i, cr0, cr1, .030); g.clip();
+      const turns = 16;
       for (let k = 0; k <= turns; k++){
         const rr = cr0 + (cr1 - cr0) * (k / turns);
-        g.strokeStyle = k % 2 ? 'rgba(0,0,0,.42)' : 'rgba(196,150,96,.20)';
-        g.lineWidth = Math.max(.6, R * .0045);
+        g.strokeStyle = k % 2 ? 'rgba(0,0,0,.44)' : 'rgba(196,150,96,.22)';
+        g.lineWidth = Math.max(.6, R * .0038);
         g.beginPath(); g.arc(cx, cy, rr, 0, TAU); g.stroke();
       }
       g.restore();
     }
 
-    // ── containment rim around the plasma chamber
-    brushed(g, R * .205, R * .268, 17, 10);
-
-    // ── chamber floor (dark, so the readout text stays legible)
-    const fg = g.createRadialGradient(cx, cy, 0, cx, cy, R * .21);
+    // containment rim + chamber floor
+    brushed(g, R * .175, R * .232, 17, 10);
+    const fg = g.createRadialGradient(cx, cy, 0, cx, cy, R * .18);
     fg.addColorStop(0, '#05080d'); fg.addColorStop(1, '#020407');
     g.fillStyle = fg;
-    g.beginPath(); g.arc(cx, cy, R * .21, 0, TAU); g.fill();
+    g.beginPath(); g.arc(cx, cy, R * .18, 0, TAU); g.fill();
   }
 
-  /* ── discharge arcs ───────────────────────────────────── */
+  /* ── discharge ────────────────────────────────────────── */
 
   function spawnDischarge(){
     const seg = Math.floor(Math.random() * SEG);
     const a = seg / SEG * TAU - Math.PI / 2;
-    const pts = [[R * .20, a + (Math.random() - .5) * .3], [R * .285, a + (Math.random() - .5) * .12]];
-    // midpoint displacement in polar space
+    const pts = [[R * .17, a + (Math.random() - .5) * .3], [R * .275, a + (Math.random() - .5) * .12]];
     for (let pass = 0; pass < 4; pass++){
       const next = [pts[0]];
       for (let i = 0; i < pts.length - 1; i++){
@@ -375,7 +531,7 @@ const reactor = (() => {
       }
       pts.length = 0; pts.push(...next);
     }
-    discharge.push({ pts, life: 1, seg });
+    discharge.push({ pts, life: 1 });
     coilTarget[seg] = 1;
   }
 
@@ -384,12 +540,13 @@ const reactor = (() => {
   function draw(){
     raf = requestAnimationFrame(draw);
     frame++;
-    t += reduce ? 0.0016 : 0.016;
+    t += 0.016 * rate;
 
     if (frame % 15 === 0){
       const cs = getComputedStyle(ROOT_EL);
       acc  = cs.getPropertyValue('--acc').trim()   || acc;
       acc2 = cs.getPropertyValue('--acc-2').trim() || acc2;
+      if (acc + acc2 !== grad.key) buildGradients();   // state changed colour
     }
 
     const analyser = liveAnalyser();
@@ -398,7 +555,7 @@ const reactor = (() => {
     level += (target - level) * 0.16;
 
     ctx.clearRect(0, 0, W, H);
-    if (R <= 4) return;
+    if (R <= 8) return;
 
     // spectrum
     if (analyser){
@@ -412,13 +569,11 @@ const reactor = (() => {
       }
     } else {
       for (let i = 0; i < BARS; i++){
-        const v = (Math.sin(t * 1.5 + i * .38) * .5 + .5) * (.08 + level * .45);
+        const v = (Math.sin(t * 1.5 + i * .34) * .5 + .5) * (.08 + level * .45);
         spectrum[i] += (v - spectrum[i]) * .09;
       }
     }
 
-    // coil energy chases the spectrum, with a rotating bias so power
-    // visibly cycles around the ring
     for (let i = 0; i < SEG; i++){
       const s = spectrum[Math.floor(i / SEG * BARS)] || 0;
       const sweep = Math.pow(Math.max(0, Math.sin(t * 1.1 - i / SEG * TAU)), 6);
@@ -428,63 +583,121 @@ const reactor = (() => {
 
     ctx.drawImage(still, 0, 0, W, H);
 
-    // ── coil glow (additive, over the machined bodies)
-    ctx.save();
-    ctx.globalCompositeOperation = 'lighter';
-    const cr0 = R * .275, cr1 = R * .53;
-    for (let i = 0; i < SEG; i++){
-      const e = coil[i];
-      const a = i / SEG * TAU - Math.PI / 2;
-      const gx = cx + Math.cos(a) * cr0, gy = cy + Math.sin(a) * cr0;
-      // light emitted from the coil's inner edge and falling off outward —
-      // a filled wedge reads as a paper cutout, a gradient reads as glow
-      const cg = ctx.createRadialGradient(gx, gy, 0, gx, gy, (cr1 - cr0) * .95);
-      cg.addColorStop(0, acc2); cg.addColorStop(.22, acc); cg.addColorStop(1, 'rgba(0,0,0,0)');
-      ctx.globalAlpha = clamp(e * .42, 0, .7);
-      coilPath(ctx, i, cr0, cr1, .034);
-      ctx.fillStyle = cg; ctx.fill();
-      // bright inner tip
-      ctx.globalAlpha = clamp(e * .95, 0, 1);
-      ctx.strokeStyle = acc2;
-      ctx.lineWidth = Math.max(1.2, R * .008);
+    // ── reciprocating actuators, in the outer channel
+    const aBase = R * .762, aMax = R * .078;
+    for (let i = 0; i < ACTS; i++){
+      const a = i / ACTS * TAU - Math.PI / 2;
+      const ph = Math.sin(t * 1.6 - i / ACTS * TAU * 2) * .5 + .5;
+      const ext = aBase + aMax * (.25 + ph * .72 + level * .12);
+      const ca = Math.cos(a), sa = Math.sin(a);
+      // barrel
+      ctx.strokeStyle = '#2b3542';
+      ctx.lineWidth = Math.max(2, R * .020);
+      ctx.lineCap = 'butt';
       ctx.beginPath();
-      const half = TAU / SEG / 2 - .034;
-      ctx.arc(cx, cy, cr0 * 1.01, a - half * .8, a + half * .8);
+      ctx.moveTo(cx + ca * aBase, cy + sa * aBase);
+      ctx.lineTo(cx + ca * (aBase + aMax * .55), cy + sa * (aBase + aMax * .55));
+      ctx.stroke();
+      // polished rod
+      ctx.strokeStyle = '#8fa3b6';
+      ctx.lineWidth = Math.max(1, R * .0075);
+      ctx.beginPath();
+      ctx.moveTo(cx + ca * (aBase + aMax * .3), cy + sa * (aBase + aMax * .3));
+      ctx.lineTo(cx + ca * ext, cy + sa * ext);
+      ctx.stroke();
+      // head
+      ctx.fillStyle = ph > .82 ? acc : '#5b6b7d';
+      ctx.beginPath();
+      ctx.arc(cx + ca * ext, cy + sa * ext, Math.max(1.4, R * .0105), 0, TAU);
+      ctx.fill();
+    }
+
+    // ── outer ring gear + counter-rotating data ring
+    drawRingGear(t * .055);
+    if (sprite.dataRing) blit(sprite.dataRing, sprite.dataRingPx, -t * .085);
+
+    // ── planetary gears, meshed to the ring gear
+    // orbit and spin are locked so the teeth track the race instead of sliding
+    // spin/orbit ratio follows the gear sizes, so teeth track the race
+    const orbitR = R * .672, spin = -t * .055 * ((R * RG_IN * 2) / (R * .175)) * .5;
+    for (let i = 0; i < PLANS; i++){
+      const a = i / PLANS * TAU + t * .055;
+      const px = cx + Math.cos(a) * orbitR, py = cy + Math.sin(a) * orbitR;
+      // carrier arm
+      ctx.strokeStyle = 'rgba(140,170,195,.16)';
+      ctx.lineWidth = Math.max(1, R * .006);
+      ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(px, py); ctx.stroke();
+      if (sprite.planet) blit(sprite.planet, sprite.planetPx, spin + a, px, py);
+    }
+
+    // ── sequencing status LEDs
+    for (let i = 0; i < LEDS; i++){
+      const a = i / LEDS * TAU - Math.PI / 2;
+      const chase = Math.pow(Math.max(0, Math.sin(t * 2.2 - i / LEDS * TAU * 3)), 8);
+      const on = chase * .9 + (spectrum[Math.floor(i / LEDS * BARS)] || 0) * .5;
+      ctx.globalAlpha = .18 + on;
+      ctx.fillStyle = on > .5 ? acc2 : acc;
+      ctx.beginPath();
+      ctx.arc(cx + Math.cos(a) * R * .638, cy + Math.sin(a) * R * .638,
+              Math.max(1, R * .0055), 0, TAU);
+      ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+
+    // ── stepper-indexed collar: discrete jumps, not a smooth spin
+    if (t > indexNext){ indexAngle += TAU / 24; indexNext = t + .42; }
+    ctx.save();
+    ctx.translate(cx, cy); ctx.rotate(indexAngle);
+    ctx.strokeStyle = 'rgba(170,205,225,.30)';
+    for (let i = 0; i < 24; i++){
+      const a = i / 24 * TAU, major = i % 6 === 0;
+      ctx.lineWidth = major ? Math.max(1.4, R * .006) : Math.max(.7, R * .0025);
+      ctx.beginPath();
+      ctx.moveTo(Math.cos(a) * R * .512, Math.sin(a) * R * .512);
+      ctx.lineTo(Math.cos(a) * R * (major ? .552 : .540), Math.sin(a) * R * (major ? .552 : .540));
       ctx.stroke();
     }
     ctx.restore();
 
-    // ── counter-rotating gimbal rings
+    // ── gimbal arcs
     const gimbals = [
-      { r: .615, from: 0,    len: 1.25, sp:  .34, w: .0115, a: .9  },
-      { r: .672, from: 2.3,  len: .78,  sp: -.23, w: .0075, a: .62 },
-      { r: .724, from: 4.1,  len: 1.9,  sp:  .15, w: .005,  a: .4  },
-      { r: .758, from: 5.2,  len: .5,   sp: -.44, w: .009,  a: .75 },
+      { r: .585, from: 0,   len: 1.25, sp:  .34, w: .0100, a: .9  },
+      { r: .606, from: 2.3, len: .78,  sp: -.23, w: .0065, a: .6  },
+      { r: .566, from: 4.1, len: 1.9,  sp:  .15, w: .0045, a: .38 },
+      { r: .620, from: 5.2, len: .5,   sp: -.44, w: .0080, a: .75 },
     ];
+    // Glow is a wide faint pass under a narrow bright one. shadowBlur would
+    // look similar but costs a full blur per stroke — at this many strokes
+    // per frame it was the single biggest thing in the profile.
     ctx.save(); ctx.globalCompositeOperation = 'lighter'; ctx.lineCap = 'round';
     for (const gm of gimbals){
-      ctx.globalAlpha = gm.a * (.55 + level * .5);
-      ctx.strokeStyle = acc2;
-      ctx.shadowBlur = R * .05; ctx.shadowColor = acc;
-      ctx.lineWidth = Math.max(1, R * gm.w);
+      const base = gm.a * (.55 + level * .5);
+      const lw = Math.max(1, R * gm.w);
       ctx.beginPath();
       ctx.arc(cx, cy, R * gm.r, gm.from + t * gm.sp, gm.from + gm.len + t * gm.sp);
-      ctx.stroke();
+      ctx.globalAlpha = base * .22; ctx.strokeStyle = acc;
+      ctx.lineWidth = lw * 4; ctx.stroke();
+      ctx.globalAlpha = base; ctx.strokeStyle = acc2;
+      ctx.lineWidth = lw; ctx.stroke();
     }
     ctx.restore();
 
-    // ── audio spectrum ring
-    const sInner = R * .618, sSpan = R * .155;
+    // ── spectrum ring
+    const sInner = R * .525, sSpan = R * .105;
     ctx.save(); ctx.globalCompositeOperation = 'lighter';
     ctx.translate(cx, cy); ctx.rotate(-Math.PI / 2);
-    ctx.shadowBlur = R * .03; ctx.shadowColor = acc;
     ctx.lineCap = 'round';
+    // one wide faint underlay for the whole ring, then the bright bars
+    ctx.globalAlpha = .10 + level * .12;
+    ctx.strokeStyle = acc;
+    ctx.lineWidth = Math.max(2, R * .016);
+    ctx.beginPath(); ctx.arc(0, 0, sInner + sSpan * .3, 0, TAU); ctx.stroke();
     for (let i = 0; i < BARS; i++){
       const a = i / BARS * TAU;
       const h = sSpan * (.07 + spectrum[i] * 1.1);
-      ctx.globalAlpha = .3 + spectrum[i] * .7;
-      ctx.strokeStyle = i % 11 === 0 ? acc2 : acc;
-      ctx.lineWidth = Math.max(1.3, R * .0055);
+      ctx.globalAlpha = .34 + spectrum[i] * .66;
+      ctx.strokeStyle = i % 12 === 0 ? acc2 : acc;
+      ctx.lineWidth = Math.max(1.2, R * .005);
       ctx.beginPath();
       ctx.moveTo(Math.cos(a) * sInner, Math.sin(a) * sInner);
       ctx.lineTo(Math.cos(a) * (sInner + h), Math.sin(a) * (sInner + h));
@@ -492,93 +705,138 @@ const reactor = (() => {
     }
     ctx.restore();
 
-    // ── discharge arcs from the plasma to the coils
+    // ── coil glow + moving armature caps
+    ctx.save();
+    const cr0 = R * .265, cr1 = R * .495;
+    ctx.globalCompositeOperation = 'lighter';
+    for (let i = 0; i < SEG; i++){
+      const e = coil[i];
+      const a = i / SEG * TAU - Math.PI / 2;
+      ctx.globalAlpha = clamp(e * .42, 0, .7);
+      coilPath(ctx, i, cr0, cr1, .030);
+      ctx.fillStyle = grad.coil[i]; ctx.fill();
+      ctx.globalAlpha = clamp(e * .95, 0, 1);
+      ctx.strokeStyle = acc2;
+      ctx.lineWidth = Math.max(1.2, R * .007);
+      const half = TAU / SEG / 2 - .030;
+      ctx.beginPath();
+      ctx.arc(cx, cy, cr0 * 1.01, a - half * .8, a + half * .8);
+      ctx.stroke();
+    }
+    ctx.restore();
+
+    // armature caps slide along each coil with its energy
+    for (let i = 0; i < SEG; i++){
+      const a = i / SEG * TAU - Math.PI / 2;
+      const slide = cr0 + (cr1 - cr0) * (.18 + .62 * (Math.sin(t * 1.4 - i * .6) * .5 + .5));
+      const half = (TAU / SEG / 2 - .030) * .74;
+      ctx.strokeStyle = '#7d8fa3';
+      ctx.lineWidth = Math.max(1.6, R * .011);
+      ctx.lineCap = 'butt';
+      ctx.beginPath(); ctx.arc(cx, cy, slide, a - half, a + half); ctx.stroke();
+      ctx.strokeStyle = 'rgba(255,255,255,.28)';
+      ctx.lineWidth = Math.max(.6, R * .003);
+      ctx.beginPath(); ctx.arc(cx, cy, slide - R * .004, a - half, a + half); ctx.stroke();
+    }
+
+    // ── tilting stator vanes, just outside the containment rim
+    const vr0 = R * .238, vr1 = R * .262;
+    for (let i = 0; i < VANES; i++){
+      const a = i / VANES * TAU;
+      const tilt = Math.sin(t * 1.25 - i * .38) * .085 + .10;
+      ctx.strokeStyle = 'rgba(150,180,205,.55)';
+      ctx.lineWidth = Math.max(1.2, R * .0075);
+      ctx.lineCap = 'round';
+      ctx.beginPath();
+      ctx.moveTo(cx + Math.cos(a) * vr0, cy + Math.sin(a) * vr0);
+      ctx.lineTo(cx + Math.cos(a + tilt) * vr1, cy + Math.sin(a + tilt) * vr1);
+      ctx.stroke();
+    }
+
+    // ── turbine, spinning fast inside the chamber behind the plasma
+    ctx.save();
+    ctx.translate(cx, cy); ctx.rotate(t * 1.15);
+    for (let i = 0; i < TURB; i++){
+      const a = i / TURB * TAU;
+      ctx.strokeStyle = 'rgba(125,155,180,.30)';
+      ctx.lineWidth = Math.max(1, R * .0075);
+      ctx.beginPath();
+      ctx.moveTo(Math.cos(a) * R * .072, Math.sin(a) * R * .072);
+      ctx.quadraticCurveTo(
+        Math.cos(a + .30) * R * .125, Math.sin(a + .30) * R * .125,
+        Math.cos(a + .40) * R * .168, Math.sin(a + .40) * R * .168);
+      ctx.stroke();
+    }
+    ctx.restore();
+
+    // ── discharge
     if (!reduce && Math.random() < .08 + level * .5) spawnDischarge();
     ctx.save(); ctx.globalCompositeOperation = 'lighter'; ctx.lineCap = 'round';
     discharge = discharge.filter(d => {
       d.life -= .085;
       if (d.life <= 0) return false;
-      ctx.globalAlpha = d.life * .9;
-      ctx.strokeStyle = '#ffffff';
-      ctx.shadowBlur = R * .06; ctx.shadowColor = acc2;
-      ctx.lineWidth = Math.max(.8, R * .0035 * d.life);
       ctx.beginPath();
       d.pts.forEach(([r, a], i) => {
         const x = cx + Math.cos(a) * r, y = cy + Math.sin(a) * r;
         i ? ctx.lineTo(x, y) : ctx.moveTo(x, y);
       });
-      ctx.stroke();
+      ctx.globalAlpha = d.life * .3; ctx.strokeStyle = acc2;
+      ctx.lineWidth = Math.max(2, R * .012 * d.life); ctx.stroke();
+      ctx.globalAlpha = d.life * .95; ctx.strokeStyle = '#ffffff';
+      ctx.lineWidth = Math.max(.8, R * .003 * d.life); ctx.stroke();
       return true;
     });
     ctx.restore();
 
     // ── plasma torus
-    // A torus rather than a filled disc: the bright band sits at ~.17R and
-    // falls off inward, which is both how the real prop reads and what keeps
-    // the readout text on top of it legible.
     ctx.save(); ctx.globalCompositeOperation = 'lighter';
-    const pr = R * (.185 + level * .022);
-    const pg = ctx.createRadialGradient(cx, cy, R * .02, cx, cy, pr * 1.5);
-    pg.addColorStop(0,   'rgba(120,190,220,.16)');
-    pg.addColorStop(.52, acc2);
-    pg.addColorStop(.72, acc);
-    pg.addColorStop(1,   'rgba(0,0,0,0)');
+    // cached gradient, scaled per frame instead of rebuilt
     ctx.globalAlpha = .5 + level * .45;
-    ctx.fillStyle = pg;
-    ctx.beginPath(); ctx.arc(cx, cy, pr * 1.5, 0, TAU); ctx.fill();
+    ctx.fillStyle = grad.plasma;
+    ctx.beginPath(); ctx.arc(cx, cy, grad.plasmaR * (1 + level * .12), 0, TAU); ctx.fill();
 
-    // swirling hot spots inside the chamber
     for (let i = 0; i < 3; i++){
       const a = t * (.6 + i * .35) + i * 2.1;
-      const rr = R * (.11 + .035 * Math.sin(t * 1.3 + i));
+      const rr = R * (.09 + .03 * Math.sin(t * 1.3 + i));
       const x = cx + Math.cos(a) * rr, y = cy + Math.sin(a) * rr;
-      const sg = ctx.createRadialGradient(x, y, 0, x, y, R * .085);
+      const sg = ctx.createRadialGradient(x, y, 0, x, y, R * .072);
       sg.addColorStop(0, 'rgba(255,255,255,.5)');
       sg.addColorStop(.4, acc2);
       sg.addColorStop(1, 'rgba(0,0,0,0)');
       ctx.globalAlpha = .3 + level * .4;
       ctx.fillStyle = sg;
-      ctx.beginPath(); ctx.arc(x, y, R * .085, 0, TAU); ctx.fill();
+      ctx.beginPath(); ctx.arc(x, y, R * .072, 0, TAU); ctx.fill();
     }
 
-    // containment ring highlight
-    ctx.globalAlpha = .85;
-    ctx.strokeStyle = acc2;
-    ctx.shadowBlur = R * .07; ctx.shadowColor = acc;
-    ctx.lineWidth = Math.max(1.4, R * .009);
-    ctx.beginPath(); ctx.arc(cx, cy, R * .2, 0, TAU); ctx.stroke();
+    ctx.beginPath(); ctx.arc(cx, cy, R * .172, 0, TAU);
+    ctx.globalAlpha = .3; ctx.strokeStyle = acc;
+    ctx.lineWidth = Math.max(4, R * .026); ctx.stroke();
+    ctx.globalAlpha = .9; ctx.strokeStyle = acc2;
+    ctx.lineWidth = Math.max(1.4, R * .0075); ctx.stroke();
     ctx.restore();
 
-    // ── specular sweep
-    // A moving highlight raked across the housing, rather than light rays out
-    // of the core: this is a machined metal object, and what sells that is a
-    // light source travelling over the surface, not a starburst.
+    // ── specular sweep over the metal
     ctx.save();
     ctx.globalCompositeOperation = 'lighter';
-    ring(ctx, R * .565, R * .972); ctx.clip();
+    ring(ctx, R * .50, R * .995); ctx.clip();
     const sweepA = t * .35;
     const sx = cx + Math.cos(sweepA) * R, sy = cy + Math.sin(sweepA) * R;
     const sg2 = ctx.createRadialGradient(sx, sy, 0, sx, sy, R * 1.15);
     sg2.addColorStop(0,   'rgba(210,235,255,.15)');
     sg2.addColorStop(.28, 'rgba(160,200,230,.05)');
     sg2.addColorStop(1,   'rgba(0,0,0,0)');
-    ctx.globalAlpha = .85;
-    ctx.fillStyle = sg2;
+    ctx.globalAlpha = .85; ctx.fillStyle = sg2;
     ctx.fillRect(cx - R, cy - R, R * 2, R * 2);
     ctx.restore();
 
-    // inner lip shadow, so the housing reads as a deep bezel rather than a decal
+    // inner lip shadow for bezel depth
     ctx.save();
-    const lip = ctx.createRadialGradient(cx, cy, R * .565, cx, cy, R * .70);
-    lip.addColorStop(0, 'rgba(0,0,0,.55)');
-    lip.addColorStop(1, 'rgba(0,0,0,0)');
-    ctx.fillStyle = lip;
-    ring(ctx, R * .565, R * .70); ctx.fill();
+    ctx.fillStyle = grad.lip; ring(ctx, R * .50, R * .63); ctx.fill();
     ctx.restore();
 
-    // ── orbiting sparks
-    if (!reduce && sparks.length < 26 && Math.random() < .3){
-      sparks.push({ a: Math.random() * TAU, r: R * (.3 + Math.random() * .45),
+    // ── sparks
+    if (!reduce && sparks.length < 30 && Math.random() < .3){
+      sparks.push({ a: Math.random() * TAU, r: R * (.28 + Math.random() * .3),
                     v: (Math.random() - .5) * .012, life: 1, s: Math.random() });
     }
     ctx.save(); ctx.globalCompositeOperation = 'lighter';
@@ -587,19 +845,19 @@ const reactor = (() => {
       if (p.life <= 0) return false;
       ctx.globalAlpha = p.life * .7;
       ctx.fillStyle = p.s > .5 ? acc2 : acc;
-      const x = cx + Math.cos(p.a) * p.r, y = cy + Math.sin(p.a) * p.r;
-      ctx.beginPath(); ctx.arc(x, y, Math.max(.7, R * .0035 * p.life), 0, TAU); ctx.fill();
+      ctx.beginPath();
+      ctx.arc(cx + Math.cos(p.a) * p.r, cy + Math.sin(p.a) * p.r,
+              Math.max(.7, R * .003 * p.life), 0, TAU);
+      ctx.fill();
       return true;
     });
     ctx.restore();
 
-    // ── outer bloom
+    // ── bloom
     ctx.save(); ctx.globalCompositeOperation = 'lighter';
-    const bg = ctx.createRadialGradient(cx, cy, R * .1, cx, cy, R * 1.15);
-    bg.addColorStop(0, acc); bg.addColorStop(.35, 'rgba(0,0,0,0)');
     ctx.globalAlpha = .10 + level * .2;
-    ctx.fillStyle = bg;
-    ctx.beginPath(); ctx.arc(cx, cy, R * 1.15, 0, TAU); ctx.fill();
+    ctx.fillStyle = grad.bloom;
+    ctx.beginPath(); ctx.arc(cx, cy, R * 1.1, 0, TAU); ctx.fill();
     ctx.restore();
   }
 

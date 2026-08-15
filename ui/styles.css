@@ -119,7 +119,7 @@ button{ font-family:inherit; }
 #stage{
   position:fixed; inset:0; z-index:2;
   display:flex; flex-direction:column; align-items:center; justify-content:center;
-  gap:min(3vh,26px); padding:calc(var(--bar-h) + 2vh) 4vw 8vh;
+  gap:min(2vh,14px); padding:calc(var(--bar-h) + 2px) 2vw 3vh;
   pointer-events:none;
   transition:transform .34s var(--ease);
 }
@@ -131,7 +131,7 @@ body.open-bottom #stage{ transform:translateY(-15%) scale(.86); }
   position:relative; pointer-events:auto; cursor:pointer;
   /* The reactor is the interface — let it take the room it needs, but never
      more than the shorter viewport axis, so nothing ever clips. */
-  width:min(74vh, 74vw, 820px);
+  width:min(92vh, 92vw, 1120px);
   aspect-ratio:1;
   display:grid; place-items:center;
   transition:transform .5s var(--ease);
@@ -514,14 +514,14 @@ body:not(.state-boot) #boot{ opacity:0; visibility:hidden; }
 /* ── small screens ──────────────────────────────────────── */
 @media (max-width:720px){
   .bar-pills{ display:none; }
-  .reactor-wrap{ width:min(88vw,64vh); }
+  .reactor-wrap{ width:min(94vw,74vh); }
   .drawer.left,.drawer.right{ width:100vw; }
   .drawer.bottom{ width:100vw; max-height:64vh; border-radius:14px 14px 0 0; }
   .h-left span,.h-right span{ padding:10px 5px; font-size:8px; }
 }
 @media (max-height:560px){
-  #stage{ padding-top:calc(var(--bar-h) + 6px); padding-bottom:34px; }
-  .reactor-wrap{ width:min(62vh,62vw); }
+  #stage{ padding-top:calc(var(--bar-h) + 2px); padding-bottom:22px; }
+  .reactor-wrap{ width:min(78vh,78vw); }
   #subtitle{ display:none; }
 }
 
