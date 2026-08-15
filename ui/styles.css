@@ -45,6 +45,16 @@ body.state-done      { --acc:var(--green); --acc-2:#9df0bf; --acc-soft:rgba(77,2
 
 *{ box-sizing:border-box; margin:0; padding:0; }
 
+/* Several overlays below (#lightbox, #palette, #songBanner) set an
+   unconditional `display` on their own id selector so they lay themselves
+   out correctly the instant JS clears `hidden`. But an id selector beats the
+   browser's built-in `[hidden]{display:none}` rule on specificity, which
+   makes the `hidden` attribute a no-op for exactly those elements: they stay
+   laid out, catching every click through their full-viewport backdrop, even
+   while "hidden". This is the standard fix — !important is deliberate here,
+   it's the one place a hidden element must never lose to any other rule. */
+[hidden]{ display:none !important; }
+
 html,body{ height:100%; }
 body{
   background:var(--bg);

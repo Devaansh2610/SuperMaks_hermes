@@ -1,6 +1,7 @@
+<meta charset="utf-8">
 <title>SuperMaks Mission Control</title>
 <style>
-.sm-root{position:fixed;inset:0;overflow:hidden}
+#smRoot{position:fixed;inset:0;overflow:hidden}
 /* ════════════════════════════════════════════════════════════
    SUPERMAKS · mission control
    No webfonts, no libraries. The whole thing has to work on a
@@ -40,16 +41,26 @@
 }
 
 /* state → accent. Nothing else needs to know what mode we're in. */
-.sm-root.state-listening { --acc:var(--aqua);  --acc-2:#7ef4ff; --acc-soft:rgba(55,230,208,.2);  --acc-line:rgba(55,230,208,.55); }
-.sm-root.state-thinking  { --acc:var(--amber); --acc-2:#ffd79a; --acc-soft:rgba(255,177,77,.16); --acc-line:rgba(255,177,77,.5); }
-.sm-root.state-speaking  { --acc:var(--viole); --acc-2:#d6bcff; --acc-soft:rgba(171,123,255,.16);--acc-line:rgba(171,123,255,.5); }
-.sm-root.state-fault     { --acc:var(--red);   --acc-2:#ff9aa6; --acc-soft:rgba(255,93,112,.16); --acc-line:rgba(255,93,112,.5); }
-.sm-root.state-done      { --acc:var(--green); --acc-2:#9df0bf; --acc-soft:rgba(77,224,138,.14); --acc-line:rgba(77,224,138,.45); }
+#smRoot.state-listening { --acc:var(--aqua);  --acc-2:#7ef4ff; --acc-soft:rgba(55,230,208,.2);  --acc-line:rgba(55,230,208,.55); }
+#smRoot.state-thinking  { --acc:var(--amber); --acc-2:#ffd79a; --acc-soft:rgba(255,177,77,.16); --acc-line:rgba(255,177,77,.5); }
+#smRoot.state-speaking  { --acc:var(--viole); --acc-2:#d6bcff; --acc-soft:rgba(171,123,255,.16);--acc-line:rgba(171,123,255,.5); }
+#smRoot.state-fault     { --acc:var(--red);   --acc-2:#ff9aa6; --acc-soft:rgba(255,93,112,.16); --acc-line:rgba(255,93,112,.5); }
+#smRoot.state-done      { --acc:var(--green); --acc-2:#9df0bf; --acc-soft:rgba(77,224,138,.14); --acc-line:rgba(77,224,138,.45); }
 
 *{ box-sizing:border-box; margin:0; padding:0; }
 
-html,body,.sm-root{ height:100%; }
-body,.sm-root{
+/* Several overlays below (#lightbox, #palette, #songBanner) set an
+   unconditional `display` on their own id selector so they lay themselves
+   out correctly the instant JS clears `hidden`. But an id selector beats the
+   browser's built-in `[hidden]{display:none}` rule on specificity, which
+   makes the `hidden` attribute a no-op for exactly those elements: they stay
+   laid out, catching every click through their full-viewport backdrop, even
+   while "hidden". This is the standard fix — !important is deliberate here,
+   it's the one place a hidden element must never lose to any other rule. */
+[hidden]{ display:none !important; }
+
+html,#smRoot{ height:100%; }
+#smRoot{
   background:var(--bg);
   color:var(--ink);
   font:400 14px/1.5 var(--sans);
@@ -263,7 +274,7 @@ body,.sm-root{
 .rtag.done{ color:var(--green); border-color:rgba(77,224,138,.4); }
 .rtag.err{ color:var(--red);   border-color:rgba(255,93,112,.4); }
 
-.rbody,.sm-root{
+.r#smRoot{
   flex:1; min-height:0; overflow:auto;
   font:400 15px/1.68 var(--sans); color:var(--ink);
   white-space:pre-wrap; word-break:break-word;
@@ -540,7 +551,7 @@ body,.sm-root{
   position:fixed; inset:0; z-index:60; display:grid; place-items:center;
   background:var(--bg); transition:opacity .5s var(--ease), visibility .5s;
 }
-.sm-root:not(.state-boot) #boot{ opacity:0; visibility:hidden; }
+#smRoot:not(.state-boot) #boot{ opacity:0; visibility:hidden; }
 .boot-inner{ width:min(420px,86vw); text-align:center; }
 .boot-mark{
   width:66px; height:66px; margin:0 auto 20px; border-radius:50%;
@@ -581,7 +592,7 @@ body,.sm-root{
     grid-template-columns:1fr; grid-auto-rows:min-content;
     overflow:auto; height:auto; min-height:calc(100% - 66px);
   }
-  body,.sm-root{ overflow:auto; }
+  #smRoot{ overflow:auto; }
   .reactor{ height:260px; }
   .response{ min-height:220px; }
   .logpanel{ min-height:240px; }
@@ -593,7 +604,7 @@ body,.sm-root{
 }
 
 </style>
-<div class="sm-root state-boot" id="smRoot">
+<div class="state-boot" id="smRoot">
 
 
 <!-- ══ boot ══ -->
@@ -813,7 +824,7 @@ body,.sm-root{
 <!-- ══ screenshot lightbox ══ -->
 <div id="lightbox" hidden><img id="lightboxImg" alt="Mac screen"></div>
 
-<script src="app.js"></script>
+
 
 </div>
 <script>
