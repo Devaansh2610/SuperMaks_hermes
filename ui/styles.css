@@ -427,6 +427,47 @@ body{
   font:400 9.5px/1 var(--mono); color:var(--ink-faint); letter-spacing:.08em;
 }
 
+/* ── Mac action approvals ───────────────────────────────── */
+#approvals{
+  position:fixed; z-index:45; top:80px; right:16px;
+  display:flex; flex-direction:column; gap:10px;
+  width:min(360px, 92vw); pointer-events:none;
+}
+.approval{
+  pointer-events:auto;
+  border:1px solid rgba(255,177,77,.5); border-radius:12px;
+  background:rgba(18,14,8,.92); backdrop-filter:blur(16px);
+  padding:13px 14px; box-shadow:0 20px 50px -20px #000, 0 0 40px -18px var(--amber);
+  animation:approvalIn .22s var(--ease);
+}
+@keyframes approvalIn{ from{ opacity:0; transform:translateX(14px) scale(.98) } }
+.approval-head{ display:flex; align-items:center; gap:8px; margin-bottom:8px; }
+.approval-head b{
+  font:700 9.5px/1 var(--mono); letter-spacing:.16em; text-transform:uppercase; color:var(--amber);
+}
+.approval-head .tool{
+  margin-left:auto; font:500 9px/1 var(--mono); color:var(--ink-faint);
+  border:1px solid var(--line); border-radius:5px; padding:3px 6px;
+}
+.approval-desc{ font:400 12px/1.4 var(--sans); color:var(--ink); margin-bottom:6px; }
+.approval-cmd{
+  font:400 10.5px/1.5 var(--mono); color:var(--ink-dim);
+  background:rgba(0,0,0,.35); border-radius:7px; padding:7px 9px;
+  max-height:80px; overflow:auto; white-space:pre-wrap; word-break:break-word;
+  margin-bottom:10px;
+}
+.approval-row{ display:flex; gap:8px; }
+.approval-row button{
+  flex:1; cursor:pointer; padding:8px; border-radius:8px;
+  font:600 10.5px/1 var(--mono); letter-spacing:.08em; text-transform:uppercase;
+  border:1px solid var(--line); background:rgba(255,255,255,.02); color:var(--ink-dim);
+  transition:.15s var(--ease);
+}
+.approval-row .allow{ color:var(--green); border-color:rgba(77,224,138,.4); }
+.approval-row .allow:hover{ background:rgba(77,224,138,.14); }
+.approval-row .deny{ color:var(--red); border-color:rgba(255,93,112,.4); }
+.approval-row .deny:hover{ background:rgba(255,93,112,.14); }
+
 /* ── lightbox ───────────────────────────────────────────── */
 #lightbox{
   position:fixed; inset:0; z-index:50; display:grid; place-items:center; padding:36px;

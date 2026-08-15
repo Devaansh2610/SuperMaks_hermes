@@ -904,6 +904,66 @@ $('#macActs').addEventListener('click', async e => {
   pollMac();
 });
 
+/* ══════════════ 9b. Mac action approvals ══════════════
+   tools/mac-guard.sh (used by Hermes' mac-sh / mac-osa) blocks a running Mac
+   tool call the moment it classifies something as risky, and files a request
+   here. This polls for those requests and lets a human resolve them one at a
+   time — the shell script on the other end is genuinely waiting on this. */
+
+const knownApprovals = new Set();
+
+function renderApprovals(list){
+  const box = $('#approvals');
+  const ids = new Set(list.map(a => a.id));
+  // drop cards for anything no longer pending (approved/denied/timed out elsewhere)
+  $$('#approvals .approval').forEach(el => { if (!ids.has(el.dataset.id)) el.remove(); });
+
+  for (const a of list){
+    if (knownApprovals.has(a.id) && $(`.approval[data-id="${a.id}"]`)) continue;
+    knownApprovals.add(a.id);
+    log('mac','APPROVAL NEEDED', `${a.tool}: ${a.desc}`);
+    const el = document.createElement('div');
+    el.className = 'approval';
+    el.dataset.id = a.id;
+    el.innerHTML = `
+      <div class="approval-head"><b>⚠ confirm required</b><span class="tool">${esc(a.tool)}</span></div>
+      <div class="approval-desc">${esc(a.desc)}</div>
+      <div class="approval-cmd">${esc(a.cmd)}</div>
+      <div class="approval-row">
+        <button class="deny">Deny</button>
+        <button class="allow">Approve</button>
+      </div>`;
+    box.appendChild(el);
+  }
+}
+
+async function decideApproval(id, approve){
+  const el = $(`.approval[data-id="${id}"]`);
+  el?.remove();
+  knownApprovals.delete(id);
+  try {
+    await api('/api/mac/approvals/decide', {
+      method:'POST', headers:headers({'content-type':'application/json'}),
+      body: JSON.stringify({id, approve}),
+    });
+    log('mac', approve ? 'APPROVED' : 'DENIED', id);
+  } catch(_){ log('error','ERROR','could not send the decision'); }
+}
+
+$('#approvals').addEventListener('click', e => {
+  const card = e.target.closest('.approval'); if (!card) return;
+  if (e.target.classList.contains('allow')) decideApproval(card.dataset.id, true);
+  if (e.target.classList.contains('deny'))  decideApproval(card.dataset.id, false);
+});
+
+async function pollApprovals(){
+  if (!RT.mac) return;
+  try {
+    const j = await api('/api/mac/approvals', {headers:headers()}).then(r => r.json());
+    renderApprovals(j.pending || []);
+  } catch(_){}
+}
+
 /* ══════════════ 10. telemetry ══════════════ */
 
 function pill(id, cls, text){
@@ -1009,7 +1069,11 @@ function bootSequence(){
   document.body.classList.remove('state-boot');
   setState('standby','awaiting uplink');
 
-  if (RT.mac){ pollMac(); grabScreenshot(); setInterval(pollMac, 6000); }
+  if (RT.mac){
+    pollMac(); grabScreenshot();
+    setInterval(pollMac, 6000);
+    pollApprovals(); setInterval(pollApprovals, 2500);
+  }
   if (DEMO) log('note','DEMO','running against a mock backend — no Hermes, Mac, or key required');
   if (status && status.runtime !== 'hermes' && !DEMO)
     log('error','ERROR','Hermes CLI not reachable — set HERMES_CMD in .env');
@@ -1052,6 +1116,22 @@ function mockFetch(url, opts = {}){
   }
 
   if (url === '/api/mac/action') return json({ok:true, label:'Demo action', output:'ok'});
+
+  // A single fake pending approval so the confirmation gate is visible in
+  // demo mode too — it disappears for good once you Approve or Deny it.
+  if (url === '/api/mac/approvals'){
+    if (mockFetch._approvalGone) return json({pending: []});
+    return json({pending: [{
+      id:'demo1', tool:'mac-sh',
+      desc:'run a shell command on the Mac',
+      cmd:'rm ~/Desktop/old-build.zip',
+      ts: Math.floor(Date.now()/1000),
+    }]});
+  }
+  if (url === '/api/mac/approvals/decide'){
+    mockFetch._approvalGone = true;
+    return json({ok:true});
+  }
   if (url === '/api/jobs')       return json({done:[], running:[]});
   if (url === '/api/cancel' || url === '/api/new') return json({ok:true});
   if (url === '/api/speak')      return Promise.resolve({ok:false, status:503});

@@ -2,11 +2,18 @@
 # Run AppleScript on the Mac. This is the main lever for controlling apps.
 #   mac-osa 'tell application "Safari" to open location "https://example.com"'
 #   mac-osa 'tell application "Notes" to make new note with properties {body:"hi"}'
+#
+# Anything classified risky (deleting, emptying trash, moving files, killing
+# apps…) files an approval request and blocks until it's approved or denied
+# in the dashboard. See tools/mac-guard.sh.
 set -uo pipefail
 . "$(dirname "$0")/mac-lib.sh"
+. "$(dirname "$0")/mac-guard.sh"
 
 mac_need_arg "${1:-}" "'<applescript>'"
-if ! mac_osa "$*"; then
+script="$*"
+mac_guard "mac-osa" "run AppleScript on the Mac" "$script" || exit 1
+if ! mac_osa "$script"; then
   mac_gui_hint
   exit 1
 fi

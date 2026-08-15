@@ -34,8 +34,10 @@ Two separate paths reach the Mac, on purpose:
 - **`mac.py`** backs the dashboard's Mac panel. It can only run the fixed,
   named actions in `mac.ACTIONS` — lock, mute, volume, screenshot, status. A
   click in the browser can never compose a shell command.
-- **`tools/mac-*`** are on Hermes' `PATH`. *Hermes* uses these, and they are
-  fully general. The agent decides; the browser doesn't.
+- **`tools/mac-*`** are on Hermes' `PATH`. *Hermes* uses these, and — because
+  `mac-sh` and `mac-osa` are genuinely general-purpose, the same power as
+  sitting at the Mac's own terminal — every call through them passes a
+  confirmation gate first. See **Guardrails** below.
 
 ## Prerequisites
 
@@ -131,6 +133,32 @@ Verify everything at once:
 ```bash
 ./tools/mac-status
 ```
+
+### Guardrails
+
+`mac-sh` runs arbitrary shell; `mac-osa` runs arbitrary AppleScript. Both are
+as powerful as sitting at the Mac in person, so both pass through
+`tools/mac-guard.sh` before ssh is ever called:
+
+| Verdict | Example | What happens |
+|---|---|---|
+| **SAFE** | `ls`, `open -a Safari`, `sw_vers` | runs immediately |
+| **CONFIRM** | `rm`, `sudo …`, `mv`, `killall`, `chmod -R`, `curl \| sh` | files a request and **blocks** until a human clicks Approve or Deny in the dashboard, or it times out (`MAC_APPROVAL_TIMEOUT`, default 90s) |
+| **DENY** | `rm -rf /`, `diskutil erase…`, `dd if=…`, disabling SIP | refused outright — no confirmation can override it |
+
+This is enforced in the shell script itself, not in the model's instructions —
+Hermes cannot argue its way past a check that runs before it gets a chance to.
+A pending request shows up as a card in the top-right of the HUD with the
+exact command and a one-line reason; nothing runs until you decide. Set
+`MAC_CONFIRM_MODE=all` in `.env` to gate every `mac-sh`/`mac-osa` call, not
+just the risky ones, or `off` to disable the gate entirely (not recommended).
+
+**What the gate does not cover:** `mac-type` + `mac-key` can type text into
+whatever window has focus and press Return — including a Terminal window, if
+one happens to be open and focused. That's an inherent property of giving an
+agent keyboard control at all, not something a command-text filter can catch.
+If that risk matters to you, run with `MAC_CONFIRM_MODE=all` and keep an eye
+on the event stream while a session is active.
 
 ### The tools Hermes gets
 
@@ -255,6 +283,8 @@ The HUD ships no fonts and no libraries — it has to work on a machine bound to
 | `MAC_ENABLED` | `1` | switch the Mac bridge off entirely |
 | `MAC_SSH_HOST` | `mac` | ssh alias or `user@host` |
 | `MAC_SHOT_PX` | `1100` | screenshot long edge |
+| `MAC_CONFIRM_MODE` | `risky` | `risky` gates destructive commands, `all` gates every `mac-sh`/`mac-osa` call, `off` disables the gate |
+| `MAC_APPROVAL_TIMEOUT` | `90` | seconds a blocked action waits for a decision before it's treated as denied |
 | `HERMES_PROFILE` | `default` | profile whose tools are inherited |
 | `HERMES_CMD` | — | absolute path if `hermes` is not on `PATH` |
 | `SUPERMAKS_PORT` | `8730` | dashboard port |

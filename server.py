@@ -155,6 +155,11 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json({"error": "unauthorized"}, 401)
             return self._json(mac.status())
 
+        if p == "/api/mac/approvals":
+            if not self._token_ok():
+                return self._json({"error": "unauthorized"}, 401)
+            return self._json({"pending": mac.list_approvals()})
+
         rel = "index.html" if p == "/" else p.lstrip("/")
         f = (UI / rel).resolve()
         if not str(f).startswith(str(UI.resolve())) or not f.is_file():
@@ -174,7 +179,7 @@ class Handler(BaseHTTPRequestHandler):
             return self._json({"error": "unauthorized"}, 401)
 
         json_paths = {"/api/run", "/api/speak", "/api/new", "/api/cancel",
-                      "/api/mac/action", "/api/mac/screenshot"}
+                      "/api/mac/action", "/api/mac/screenshot", "/api/mac/approvals/decide"}
         ctype = self.headers.get("Content-Type", "").split(";", 1)[0].lower()
         if p in json_paths and ctype != "application/json":
             return self._json({"error": "application/json required"}, 415)
@@ -204,6 +209,14 @@ class Handler(BaseHTTPRequestHandler):
             if err:
                 return self._json({"error": err}, 503)
             return self._json({"image": image})
+
+        if p == "/api/mac/approvals/decide":
+            try:
+                body = json.loads(raw or b"{}")
+            except json.JSONDecodeError:
+                return self._json({"error": "bad json"}, 400)
+            ok = mac.decide_approval(body.get("id", ""), bool(body.get("approve")))
+            return self._json({"ok": ok}, 200 if ok else 404)
 
         if p == "/api/mac/action":
             try:

@@ -19,10 +19,18 @@ Requires, on the Ubuntu side:
 """
 import base64
 import os
+import pathlib
+import re
 import shlex
 import subprocess
 import threading
 import time
+
+ROOT = pathlib.Path(__file__).resolve().parent
+# Where tools/mac-guard.sh files a pending request before it blocks on it.
+# Same machine, same filesystem — the tool and the dashboard read the same dir.
+APPROVAL_DIR = pathlib.Path(os.environ.get("MAC_APPROVAL_DIR", ROOT / ".mac_approvals"))
+_APPROVAL_ID = re.compile(r"^[0-9]{10,32}$")
 
 HOST = (os.environ.get("MAC_SSH_HOST") or "mac").strip()
 ENABLED = (os.environ.get("MAC_ENABLED", "1").strip().lower()
@@ -201,6 +209,50 @@ def action(name, arg=""):
         status(force=True)                                # reflect it immediately
     return {"ok": rc == 0, "action": name, "label": label,
             "output": out[:2000], "error": err[:300] if rc != 0 else ""}
+
+
+# ── the approval queue ──────────────────────────────────────
+# tools/mac-guard.sh (running on this same machine) files a directory per
+# pending request and then blocks, polling `status`, until this process (via
+# the dashboard) writes "approved" or "denied" into it. The waiting happens in
+# the shell script, not here — this module only ever reads and writes files.
+
+def _read(path, default=""):
+    try:
+        return path.read_text(encoding="utf-8", errors="replace").strip()
+    except OSError:
+        return default
+
+
+def list_approvals():
+    if not APPROVAL_DIR.is_dir():
+        return []
+    out = []
+    for d in sorted(APPROVAL_DIR.iterdir()):
+        if not d.is_dir() or not _APPROVAL_ID.match(d.name):
+            continue
+        if _read(d / "status") != "pending":
+            continue
+        out.append({
+            "id": d.name,
+            "tool": _read(d / "tool", "mac"),
+            "desc": _read(d / "desc"),
+            "cmd": _read(d / "cmd")[:800],
+            "ts": int(_read(d / "ts", "0") or 0),
+        })
+    return out
+
+
+def decide_approval(approval_id, approve):
+    """Returns True if a pending request was found and resolved."""
+    approval_id = str(approval_id)
+    if not _APPROVAL_ID.match(approval_id):
+        return False
+    d = APPROVAL_DIR / approval_id
+    if not d.is_dir() or _read(d / "status") != "pending":
+        return False
+    (d / "status").write_text("approved" if approve else "denied", encoding="utf-8")
+    return True
 
 
 def summary():
