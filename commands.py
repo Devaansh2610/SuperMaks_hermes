@@ -230,21 +230,34 @@ def handle(message, runner=None):
             f"workdir={os.getcwd()}; voice={vo}; mac={mac.summary()}."))
 
     if cmd == "briefing":
-        # Fired once a day by the wake phrase, or manually. The exact opening
-        # line is deliberate — everything after it is genuinely live, pulled
-        # through whatever mail/calendar tools this Hermes profile has.
+        # Fired by the wake phrase, or manually. The opening line is fixed;
+        # everything after it is genuinely live, pulled through whatever tools
+        # and MCP servers this Hermes profile actually has connected.
         return dict(message=(
-            "This is today's once-a-day wake briefing. Using your mail and calendar tools, "
-            "check how many new or unread emails have arrived today and what is on the "
-            "calendar for today.\n\n"
-            "Open with exactly the words \"Welcome home, sir.\" Then, in one or two more "
-            "sentences: state the email count and today's schedule, including one dry, "
-            "witty aside about whatever is actually on the calendar today — not a generic "
-            "joke, something that responds to the real content. Close with one short line "
-            "asking whether they would like anything done about the emails — offer, don't act.\n\n"
-            "If mail or calendar tools aren't available, say so in one plain line instead of "
-            "guessing at numbers."
-        ), note="daily wake briefing")
+            "This is the wake briefing. Before answering, actually look — don't summarise "
+            "from memory. Survey whatever of these you have tools or MCP servers for, and "
+            "silently skip any you don't:\n"
+            "  - mail: how many new or unread messages, and who the notable ones are from\n"
+            "  - calendar: what is on today, and what is next\n"
+            "  - GitHub: recent commits, pushes, open PRs, review requests, failing checks\n"
+            "  - messages, issues, tasks, or anything else your profile is connected to\n\n"
+            "Then speak, in this shape:\n"
+            "1. Open with exactly: \"Welcome home, sir.\"\n"
+            "2. One or two sentences carrying the one or two things that actually matter "
+            "most today. Real numbers, real names, real repo and event titles — never a "
+            "placeholder, never a round-number guess.\n"
+            "3. One dry, personal aside about something specific you noticed in that data. "
+            "This is the point of the whole briefing: it must respond to the actual content, "
+            "the way a chief of staff who reads everything would. For example, if there are "
+            "recent commits to a repo, remark on the repo by name and what the work looks "
+            "like; if the calendar is unusually empty, or unusually grim, say so. Never a "
+            "generic joke that would fit any morning.\n"
+            "4. Close with one short offer of something you could do about it — an offer, "
+            "never an action already taken.\n\n"
+            "Keep the whole thing to about four spoken sentences. If a source isn't "
+            "reachable, leave it out silently rather than narrating the gap — unless nothing "
+            "at all is reachable, in which case say that plainly in one line and stop."
+        ), note="wake briefing")
 
     if cmd == "voice":
         result = voice.check()
