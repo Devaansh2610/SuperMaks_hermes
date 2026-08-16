@@ -83,10 +83,21 @@ underneath it rather than waiting for the music to finish.
 No audio file is bundled with this repo, and none ever will be — that would mean
 redistributing someone else's copyrighted recording.
 
+It also opens whatever you list in `WAKE_TABS` at the same moment — GitHub,
+Netflix, a reading list, whatever you want waiting for you.
+
 ```bash
 WAKE_SONG_SOURCE=open       # open a YouTube tab (default) · local · off
-WAKE_SONG_URL=https://...   # what to open
+WAKE_SONG_URL=https://...   # the track
+WAKE_TABS=https://github.com/,https://www.netflix.com/,https://medium.com/tag/ai-research
 ```
+
+**Allow pop-ups for `127.0.0.1:8730` in Chrome.** Browsers only permit
+programmatic tabs while a user gesture is active, and a wake triggered by
+*voice* has no gesture — so without that permission Chrome blocks them. Waking
+by tap or Control does carry a gesture and works either way. If anything is
+blocked the HUD shows a one-click banner to open them, so it always degrades to
+something usable rather than failing silently.
 
 Set `WAKE_SONG_SOURCE=local` with `WAKE_SONG_LOCAL_PATH` to stream a file you
 already own instead; it plays in-page at `WAKE_SONG_VOLUME` and ducks to
@@ -162,6 +173,7 @@ network unplugged.
 | `WAKE_SONG_SOURCE` | `open` | `open`, `local`, or `off` |
 | `WAKE_SONG_URL` | The Clash | what `open` opens |
 | `WAKE_SONG_VOLUME` / `_DUCK` | `0.35` / `0.10` | local playback level, and level while speaking |
+| `WAKE_TABS` | GitHub, Netflix, Medium | comma-separated links opened on wake; blank for none |
 | `WAKE_IDLE_HOURS` | `4.5` | hours of quiet before it goes dormant again |
 | `HERMES_PROFILE` | `default` | profile whose tools are inherited |
 | `HERMES_CMD` | — | absolute path if `hermes` is not on `PATH` |

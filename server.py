@@ -64,6 +64,14 @@ WAKE_SONG_DUCK = float(env("WAKE_SONG_DUCK", "0.10"))
 # Used when WAKE_SONG_SOURCE=open — the track opens in its own YouTube tab.
 WAKE_SONG_URL = env("WAKE_SONG_URL", "https://www.youtube.com/watch?v=xMaE6toi4mk&list=RDxMaE6toi4mk&start_radio=1&pp=ygUcc2hvdWxkIEkgc3RheSBvciBzaG91bGQgaSBnb6AHAQ%3D%3D").strip()
 
+# Opened alongside the greeting, all at once. Comma-separated; blank to disable.
+# The wake song joins this batch when WAKE_SONG_SOURCE=open, so everything the
+# wake opens goes through one code path and one popup-blocker fallback.
+WAKE_TABS = [u.strip() for u in env(
+    "WAKE_TABS",
+    "https://github.com/,https://www.netflix.com/,https://medium.com/tag/ai-research"
+).split(",") if u.strip()]
+
 # The HUD goes dormant (wake-phrase-only) on every launch, and re-arms itself
 # after this many hours with no prompt — so a laptop left running all day
 # drops back into "asleep, waiting to be woken" on its own.
@@ -165,6 +173,7 @@ class Handler(BaseHTTPRequestHandler):
                     volume=WAKE_SONG_VOLUME,
                     duck=WAKE_SONG_DUCK,
                 ),
+                wake_tabs=WAKE_TABS,
                 wake_idle_hours=WAKE_IDLE_HOURS,
                 session=SESSION["id"]))
 

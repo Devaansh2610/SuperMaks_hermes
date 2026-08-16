@@ -1436,6 +1436,7 @@ async function loadStatus(){
   RT.browserStt = !!SpeechRecognition;
   RT.browserTts = !!speechSynth;
   if (s.wake_song) WAKE_SONG = s.wake_song;
+  WAKE_TABS = s.wake_tabs || [];
   if (s.wake_idle_hours) WAKE_IDLE_MS = s.wake_idle_hours * 60 * 60 * 1000;
 
   const hermes = s.runtime === 'hermes';
@@ -1580,6 +1581,10 @@ function handleWake(){
   // reactor sat in `thinking` the whole time. Now the music starts, the
   // briefing is dispatched immediately underneath it, and the track ducks
   // out of the way the moment there's speech to hear.
+  // Opened immediately, in this tick: deferring would drop the user gesture
+  // that lets the browser allow them at all.
+  openWakeLinks();
+
   setTimeout(() => {
     playWakeSong();                // deliberately not awaited
     waking = false;
@@ -1621,20 +1626,56 @@ function stopWakeSong(){
   showSongBanner(false);
 }
 
+/* Everything the wake opens — the song (in "open" mode) plus WAKE_TABS — goes
+   out in one synchronous batch.
+
+   Synchronous matters: a browser only allows programmatic tabs while it still
+   considers a user gesture "active". Deferring any of these into a setTimeout
+   throws that away and guarantees a block. Even so, a wake triggered by VOICE
+   has no gesture at all, so Chrome will refuse unless pop-ups are allowed for
+   this origin — hence the fallback banner, which turns the retry into a real
+   click and always works. */
+let WAKE_TABS = [];
+
+function openWakeLinks(){
+  if (DEMO) return;
+  const urls = [];
+  if (WAKE_SONG.source === 'open' && WAKE_SONG.url) urls.push(WAKE_SONG.url);
+  urls.push(...WAKE_TABS);
+  if (!urls.length) return;
+
+  // Deliberately NOT the 'noopener' feature string: per spec that always
+  // returns null, so there'd be no way to tell "opened fine" from "blocked"
+  // and the fallback banner would fire every single time. Opening plainly and
+  // then nulling `opener` severs the reference just the same, while still
+  // giving us a handle to test.
+  const blocked = urls.filter(u => {
+    const w = window.open(u, '_blank');
+    if (w) { try { w.opener = null; } catch(_){} return false; }
+    return true;
+  });
+
+  if (!blocked.length){
+    log('voice','WAKE TABS', `opened ${urls.length}`);
+    $('#tabsBanner').hidden = true;
+    return;
+  }
+  log('error','WAKE TABS',
+      `${blocked.length} of ${urls.length} blocked by the browser — allow pop-ups for this page to make it automatic`);
+  const banner = $('#tabsBanner');
+  $('#tabsLabel').textContent = `${blocked.length} link${blocked.length > 1 ? 's' : ''} blocked`;
+  banner.hidden = false;
+  $('#tabsOpen').onclick = () => {           // a real click carries a gesture
+    blocked.forEach(u => { const w = window.open(u, '_blank'); if (w) { try { w.opener = null; } catch(_){} } });
+    banner.hidden = true;
+  };
+  $('#tabsDismiss').onclick = () => { banner.hidden = true; };
+}
+
 function playWakeSong(){
   return new Promise(resolve => {
-    if (DEMO || WAKE_SONG.source === 'off') return resolve();
-
-    // "open" is the default: hand the track to YouTube in its own tab. No
-    // player in the HUD, no external script, and no autoplay policy to fight —
-    // the greeting is already speaking here by the time the tab loads.
-    if (WAKE_SONG.source === 'open' && WAKE_SONG.url){
-      window.open(WAKE_SONG.url, '_blank', 'noopener');
-      log('voice','WAKE SONG','opened in a new tab');
-      return resolve();
-    }
-
-    if (WAKE_SONG.source !== 'local' || !WAKE_SONG.local_ready) return resolve();
+    // the "open" case is handled by openWakeLinks, batched with the other tabs
+    if (DEMO || WAKE_SONG.source !== 'local' || !WAKE_SONG.local_ready) return resolve();
 
     let done = false;
     const finish = () => { if (done) return; done = true; stopWakeSong(); resolve(); };
@@ -1951,7 +1992,7 @@ function mockFetch(url, opts = {}){
     stt:'fish', tts:'fish', voice_model:'s2.1-pro-free', voice_id:'612b878b113047d9a770c069c8b4fdfe',
     session:null,
     wake_song:{source:'open', url:'', local_ready:false, seconds:105, volume:.35, duck:.1},
-    wake_idle_hours:4.5,
+    wake_tabs:[], wake_idle_hours:4.5,
   });
 
 
