@@ -287,26 +287,6 @@ body.open-bottom .drawer.bottom{ transform:translateX(-50%); }
 .trow b{ color:var(--ink); font-weight:600; max-width:62%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .trow b.ok{ color:var(--green); } .trow b.warn{ color:var(--amber); } .trow b.bad{ color:var(--red); }
 
-/* subagents */
-.agents{ display:flex; flex-direction:column; gap:4px; max-height:190px; overflow:auto; }
-.agent{
-  display:flex; align-items:center; gap:8px; padding:6px 8px; border-radius:7px;
-  border:1px solid var(--line); background:rgba(255,255,255,.015);
-  font:500 10.5px/1 var(--mono);
-}
-.agent .dot{ width:6px; height:6px; border-radius:50%; background:var(--ink-faint); flex:0 0 auto; }
-.agent.ok    .dot{ background:var(--green); box-shadow:0 0 8px var(--green); }
-.agent.error .dot{ background:var(--red);   box-shadow:0 0 8px var(--red); }
-.agent.busy  .dot{ background:var(--acc); box-shadow:0 0 10px var(--acc); animation:agentPulse 1s ease-in-out infinite; }
-@keyframes agentPulse{ 0%,100%{ opacity:.4 } 50%{ opacity:1 } }
-.agent b{ color:var(--ink); font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-.agent span{ margin-left:auto; color:var(--ink-faint); font-size:9px; letter-spacing:.08em;
-             text-transform:uppercase; flex:0 0 auto; }
-.agent .why{
-  margin-left:0; text-transform:none; letter-spacing:0; font-size:9.5px;
-  overflow:hidden; text-overflow:ellipsis; white-space:nowrap; min-width:0;
-}
-
 /* log */
 .filters{ display:flex; gap:2px; }
 .filters button{
