@@ -15,6 +15,8 @@ import subprocess
 import threading
 import time
 import uuid
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from datetime import datetime, timedelta
 
 import voice
 
@@ -152,6 +154,91 @@ def _shell(cmd, timeout=25):
         return f"Unavailable: {e}"
 
 
+_GOOGLE_API = pathlib.Path.home() / ".hermes/skills/productivity/google-workspace/scripts/google_api.py"
+
+
+def _google_python():
+    """Anaconda `python` has googleapiclient; system python3 often does not."""
+    override = os.environ.get("GOOGLE_API_PYTHON", "").strip()
+    if override:
+        return override
+    return shutil.which("python") or shutil.which("python3") or "python"
+
+
+def _capture(cmd, timeout=18):
+    """Run a briefing fetch. Never swallow failures into an empty string."""
+    try:
+        p = subprocess.run(cmd, text=True, cwd=os.getcwd(), stdout=subprocess.PIPE,
+                           stderr=subprocess.PIPE, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        return f"[timed out after {timeout}s — treat as a fetch failure, not an empty inbox]"
+    except Exception as e:  # noqa: BLE001
+        return f"[unavailable: {e}]"
+    out = (p.stdout or "").strip()
+    err = (p.stderr or "").strip()
+    if p.returncode != 0:
+        return f"[failed exit {p.returncode}] {(err or out)[:900]}"
+    if not out:
+        return "[empty result]"
+    return out
+
+
+def _lines_from_json(raw, formatter, empty_note):
+    raw = (raw or "").strip()
+    if raw.startswith("["):
+        try:
+            items = json.loads(raw)
+        except json.JSONDecodeError:
+            return raw[:1800]
+        if not items:
+            return empty_note
+        if not isinstance(items, list):
+            return raw[:1800]
+        return "\n".join(formatter(x) for x in items[:8]) or empty_note
+    return raw[:1800]
+
+
+def _wake_snapshot():
+    py = _google_python()
+    script = str(_GOOGLE_API)
+    now = datetime.now().astimezone()
+    day0 = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    day1 = day0 + timedelta(days=1)
+    today = day0.strftime("%Y-%m-%d")
+
+    jobs = {
+        "gmail": [py, script, "gmail", "search", "is:unread", "--max", "5"],
+        "cal": [py, script, "calendar", "list",
+                "--start", day0.isoformat(), "--end", day1.isoformat(), "--max", "12"],
+        "gh": ["gh", "repo", "list", "--limit", "8",
+               "--json", "name,updatedAt,description,url"],
+    }
+
+    results = {k: "[not fetched]" for k in jobs}
+    with ThreadPoolExecutor(max_workers=3) as pool:
+        futs = {pool.submit(_capture, cmd): name for name, cmd in jobs.items()}
+        for fut in as_completed(futs):
+            results[futs[fut]] = fut.result()
+
+    gmail = _lines_from_json(
+        results["gmail"],
+        lambda m: f"- {m.get('from','?')} · {m.get('subject','(no subject)')} · {m.get('date','')}",
+        "No unread mail.",
+    )
+    cal = _lines_from_json(
+        results["cal"],
+        lambda e: f"- {e.get('start','?')} · {e.get('summary','(no title)')}"
+                  + (f" @ {e['location']}" if e.get("location") else ""),
+        f"No events on the primary calendar today ({today}).",
+    )
+    gh = _lines_from_json(
+        results["gh"],
+        lambda r: f"- {r.get('name','?')} · updated {r.get('updatedAt','?')}",
+        "No GitHub repos returned.",
+    )
+    return gmail, cal, gh
+
+
 def _commands_reply():
     return """Available dashboard slash commands:
 /new — reset the Hermes thread
@@ -204,34 +291,27 @@ def handle(message, runner=None):
             f"workdir={os.getcwd()}; voice={vo}."))
 
     if cmd == "briefing":
-        # Hardcoded fast path: run Gmail, Calendar, and GitHub directly
-        import subprocess
-        import json
-        
-        def run_cmd(cmd_list):
-            try:
-                p = subprocess.run(cmd_list, text=True, cwd=os.getcwd(), 
-                                   stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=25)
-                return (p.stdout or p.stderr or "").strip()
-            except Exception:
-                return ""
-        
-        gmail_out = run_cmd(["python", "/Users/devaanshmakhijani/.hermes/skills/productivity/google-workspace/scripts/google_api.py", "gmail", "search", "is:unread", "--max", "50"])
-        cal_out = run_cmd(["python", "/Users/devaanshmakhijani/.hermes/skills/productivity/google-workspace/scripts/google_api.py", "calendar", "list"])
-        gh_out = run_cmd(["gh", "repo", "list", "--limit", "10", "--json", "name,updatedAt,description,url"])
-        
-        data = f"Gmail (unread):\n{gmail_out}\n\nCalendar:\n{cal_out}\n\nGitHub repos:\n{gh_out}"
-        
+        fetched_at = datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S %Z")
+        gmail_out, cal_out, gh_out = _wake_snapshot()
+        data = (
+            f"Fetched live at {fetched_at} (not cached).\n\n"
+            f"Gmail (top 5 unread):\n{gmail_out}\n\n"
+            f"Calendar (primary, today local):\n{cal_out}\n\n"
+            f"GitHub repos (recently updated):\n{gh_out}"
+        )
         return dict(message=(
-            "This is the wake briefing. Data already fetched — no need to call tools again. "
-            "Here is the live data:\n\n" + data + "\n\n"
+            "This is the wake briefing. The data below was fetched just now from Gmail, "
+            "Google Calendar, and GitHub. Do not call tools again. Do not invent an empty inbox "
+            "if mail is listed. Empty JSON [] means that source really had nothing.\n\n"
+            + data + "\n\n"
             "Then speak in this shape:\n"
             "1. Open with exactly: \"Welcome home, sir.\"\n"
             "2. One or two sentences with the one or two things that matter most. Real numbers, real names.\n"
             "3. One dry, personal aside about something specific you noticed.\n"
             "4. Close with one short offer of something you could do.\n\n"
-            "Keep it to about four spoken sentences. If nothing reachable, say so in one line."
-        ), note="wake briefing (hardcoded)")
+            "Keep it to about four spoken sentences. If a source failed, say that source failed — "
+            "do not treat a failure as an empty inbox."
+        ), note="wake briefing (live fetch)")
 
     if cmd == "github":
         out = _shell(["gh", "repo", "list", "--limit", "10", "--json", "name,updatedAt,description,url"])

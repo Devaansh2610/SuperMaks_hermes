@@ -74,9 +74,11 @@ button{ font-family:inherit; }
   mask-image:radial-gradient(120% 90% at 50% 50%, #000 10%, transparent 75%);
 }
 .fx-vignette{ background:radial-gradient(125% 100% at 50% 50%, transparent 40%, #000 100%); opacity:.9; }
+/* Static grain only. SVG feTurbulence + mix-blend-mode was a full-viewport
+   GPU filter every frame for a 3% overlay nobody could see. */
 .fx-noise{
-  opacity:.03; mix-blend-mode:overlay;
-  background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='140' height='140'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='3'/></filter><rect width='140' height='140' filter='url(%23n)'/></svg>");
+  opacity:.025;
+  background-image:repeating-linear-gradient(0deg, rgba(255,255,255,.04) 0 1px, transparent 1px 3px);
 }
 
 /* ── slim top bar ───────────────────────────────────────── */
@@ -155,8 +157,7 @@ body.open-bottom #stage{ transform:translateY(-15%) scale(.86); }
   position:absolute; left:50%; bottom:6vh; transform:translateX(-50%) translateY(6px);
   pointer-events:none; max-width:min(720px,84vw); text-align:center;
   padding:9px 20px; border-radius:100px;
-  background:rgba(4,6,11,.74); border:1px solid var(--line);
-  backdrop-filter:blur(8px);
+  background:rgba(4,6,11,.88); border:1px solid var(--line);
   font:400 clamp(12.5px,1.4vw,16px)/1.5 var(--sans); color:var(--ink);
   text-shadow:0 2px 18px #000;
   opacity:0; transition:opacity .4s var(--ease), transform .4s var(--ease);
@@ -174,7 +175,7 @@ body.open-bottom #stage{ transform:translateY(-15%) scale(.86); }
 .handle span{
   display:block; padding:12px 7px; border-radius:8px;
   background:rgba(9,13,20,.72); border:1px solid var(--line);
-  backdrop-filter:blur(10px); white-space:nowrap;
+  white-space:nowrap;
 }
 .handle:hover{ color:var(--acc); }
 .handle:hover span{ border-color:var(--acc-line); background:var(--acc-soft); box-shadow:0 0 22px -8px var(--acc); }
@@ -194,7 +195,7 @@ body.open-bottom .h-bottom{ opacity:0; pointer-events:none; }
 /* ── drawers ────────────────────────────────────────────── */
 .drawer{
   position:fixed; z-index:20;
-  background:var(--panel); backdrop-filter:blur(20px);
+  background:var(--panel);
   transition:transform .34s var(--ease), opacity .34s var(--ease);
   display:flex;
 }
@@ -355,7 +356,7 @@ body.open-bottom .drawer.bottom{ transform:translateX(-50%); }
   position:fixed; z-index:26; top:calc(var(--bar-h) + 10px); left:50%; transform:translateX(-50%);
   display:flex; align-items:center; gap:10px;
   padding:8px 9px 8px 13px; border-radius:100px;
-  border:1px solid var(--acc-line); background:rgba(10,15,24,.92); backdrop-filter:blur(14px);
+  border:1px solid var(--acc-line); background:rgba(10,15,24,.94);
   box-shadow:0 18px 44px -20px #000, 0 0 34px -16px var(--acc);
   animation:slideIn .22s var(--ease);
 }
@@ -374,7 +375,7 @@ body.open-bottom .drawer.bottom{ transform:translateX(-50%); }
 /* ── command palette ────────────────────────────────────── */
 #palette{
   position:fixed; inset:0; z-index:40; display:grid; place-items:start center;
-  padding-top:14vh; background:rgba(2,4,8,.74); backdrop-filter:blur(8px);
+  padding-top:14vh; background:rgba(2,4,8,.86);
   animation:fade .16s var(--ease);
 }
 @keyframes fade{ from{ opacity:0 } }

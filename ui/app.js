@@ -204,10 +204,15 @@ const reactor = (() => {
   const sprite = {};                       // rotated-blit sprites
 
   let W = 0, H = 0, dpr = 1, cx = 0, cy = 0, R = 0;
-  let t = 0, level = 0, raf = 0, frame = 0;
+  let t = 0, level = 0, raf = 0, frame = 0, lastDraw = 0;
   let acc = '#37e6d0', acc2 = '#7ef4ff';
   let discharge = [], sparks = [];
   let indexAngle = 0, indexNext = 0;       // stepper collar
+  // Cap backing-store size. A 1120px reactor at 2× DPR is ~5M pixels redrawn
+  // 60 times a second with additive blends — that's the GPU/RAM bill.
+  const PIXEL_CAP = 1.15;
+  const IDLE_MS = 1000 / 24;
+  const LIVE_MS = 1000 / 40;
 
   /* Gradients are objects the renderer has to build; rebuilding a dozen of
      them 60 times a second is pure waste when their geometry never moves.
@@ -256,10 +261,11 @@ const reactor = (() => {
   };
 
   function resize(){
-    dpr = Math.min(window.devicePixelRatio || 1, 2);
+    dpr = Math.min(window.devicePixelRatio || 1, PIXEL_CAP);
     const r = cv.getBoundingClientRect();
     W = Math.max(1, r.width); H = Math.max(1, r.height);
-    cv.width = W * dpr; cv.height = H * dpr;
+    cv.width = Math.max(1, Math.round(W * dpr));
+    cv.height = Math.max(1, Math.round(H * dpr));
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     cx = W / 2; cy = H / 2; R = Math.min(W, H) / 2;
     buildStill();
@@ -267,6 +273,14 @@ const reactor = (() => {
     buildGradients();
   }
   new ResizeObserver(resize).observe(cv);
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) {
+      if (raf) { cancelAnimationFrame(raf); raf = 0; }
+    } else if (!raf) {
+      lastDraw = 0;
+      raf = requestAnimationFrame(draw);
+    }
+  });
 
   /* ── helpers ──────────────────────────────────────────── */
 
@@ -536,10 +550,20 @@ const reactor = (() => {
 
   /* ── the frame ────────────────────────────────────────── */
 
-  function draw(){
+  function live(){
+    return stateName === 'speaking' || stateName === 'listening'
+        || stateName === 'thinking' || stateName === 'transcribing';
+  }
+
+  function draw(now){
+    if (document.hidden) { raf = 0; return; }
     raf = requestAnimationFrame(draw);
+    const minGap = (reduce || !live()) ? IDLE_MS : LIVE_MS;
+    if (now - lastDraw < minGap) return;
+    const dt = lastDraw ? Math.min(0.05, (now - lastDraw) / 1000) : 0.016;
+    lastDraw = now;
     frame++;
-    t += 0.016 * rate;
+    t += dt * rate;
 
     if (frame % 15 === 0){
       const cs = getComputedStyle(ROOT_EL);
@@ -768,8 +792,8 @@ const reactor = (() => {
     }
     ctx.restore();
 
-    // ── discharge
-    if (!reduce && Math.random() < .08 + level * .5) spawnDischarge();
+    // ── discharge (skip while idle — particles were burning GPU for a screensaver)
+    if (!reduce && live() && Math.random() < .08 + level * .5) spawnDischarge();
     ctx.save(); ctx.globalCompositeOperation = 'lighter'; ctx.lineCap = 'round';
     discharge = discharge.filter(d => {
       d.life -= .085;
@@ -834,7 +858,7 @@ const reactor = (() => {
     ctx.restore();
 
     // ── sparks
-    if (!reduce && sparks.length < 30 && Math.random() < .3){
+    if (!reduce && live() && sparks.length < 18 && Math.random() < .18){
       sparks.push({ a: Math.random() * TAU, r: R * (.28 + Math.random() * .3),
                     v: (Math.random() - .5) * .012, life: 1, s: Math.random() });
     }
@@ -860,7 +884,7 @@ const reactor = (() => {
     ctx.restore();
   }
 
-  return { start(){ resize(); if (!raf) draw(); } };
+  return { start(){ resize(); if (!raf) raf = requestAnimationFrame(draw); } };
 })();
 
 /* the small live meter inside the Voice button */
@@ -868,13 +892,11 @@ const micMeter = (() => {
   const cv = $('#micMeter');
   const ctx = cv.getContext('2d');
   const N = 30, vals = new Float32Array(N);
-  let i = 0;
-  function frame(){
-    requestAnimationFrame(frame);
+  let i = 0, raf = 0;
+  function paint(){
     const w = cv.clientWidth, h = cv.clientHeight;
     if (!w) return;
     if (cv.width !== w) { cv.width = w; cv.height = h; }
-    vals[i = (i + 1) % N] = (convo || pttArmed) ? clamp(rmsOf(bus.micAnalyser) * 5, 0, 1) : 0;
     ctx.clearRect(0, 0, w, h);
     const bw = w / N;
     ctx.fillStyle = getComputedStyle(ROOT_EL).getPropertyValue('--acc').trim() || '#37e6d0';
@@ -886,13 +908,24 @@ const micMeter = (() => {
     }
     ctx.globalAlpha = 1;
   }
-  return { start(){ frame(); } };
+  function frame(){
+    raf = 0;
+    if (!(convo || pttArmed) || document.hidden) { vals.fill(0); paint(); return; }
+    raf = requestAnimationFrame(frame);
+    vals[i = (i + 1) % N] = clamp(rmsOf(bus.micAnalyser) * 5, 0, 1);
+    paint();
+  }
+  return {
+    start(){ if (!raf) raf = requestAnimationFrame(frame); },
+    kick(){ if (!raf) raf = requestAnimationFrame(frame); },
+  };
 })();
 
 /* ══════════════ 5. the run ══════════════ */
 
 let running = false, answer = '', gotFirstDelta = false, speakThisRun = true;
 let speakDone = Promise.resolve(), activeController = null;
+let holdListen = false;   // hands-free loop: after each reply, listen again until Control
 
 async function transmit(message, options = {}){
   if (!message.trim()) return;
@@ -903,6 +936,8 @@ async function transmit(message, options = {}){
   lastActivity = Date.now();       // restarts the idle clock that re-arms dormant mode
   running = true; answer = ''; gotFirstDelta = false;
   speakThisRun = options.speak !== false;
+  holdListen = true;               // every reply returns to listening until Control
+  suppress = true;                 // deaf while thinking, so it never hears itself
 
   const fresh = /^\/new\b/.test(message.trim());
   const id = rid();
@@ -957,6 +992,7 @@ async function transmit(message, options = {}){
   clearInterval(tick);
   await speakDone;
   setSubtitle('');
+  afterTurn();
 }
 
 function handleEvent(ev){
@@ -988,16 +1024,7 @@ function handleEvent(ev){
       log('complete','COMPLETE', ev.ms != null ? `run completed in ${ev.ms}ms` : 'run completed');
       renderAnswer(true);
       speakDone = speakThisRun ? speak(answer)
-                               : ((duckWakeSong(false), setState('listening','listening…')), Promise.resolve());
-      // After briefing, start continuous listening mode
-      setTimeout(() => {
-        if (!convo && !suppress && SpeechRecognition && !running) {
-          convo = true; suppress = false;
-          micButton(true, 'Listening');
-          setState('listening','listening…');
-          startBrowserRecognition();
-        }
-      }, 500);
+                               : Promise.resolve();
       break;
 
     case 'error':
@@ -1006,15 +1033,6 @@ function handleEvent(ev){
       log('error','ERROR', ev.message || 'unknown');
       if (!answer) $('#response').innerHTML = `<span class="fault">⚠ ${esc(ev.message || 'Run failed.')}</span>`;
       else renderAnswer(true);
-      // After error, start continuous listening mode
-      setTimeout(() => {
-        if (!convo && !suppress && SpeechRecognition && !running) {
-          convo = true; suppress = false;
-          micButton(true, 'Listening');
-          setState('listening','listening…');
-          startBrowserRecognition();
-        }
-      }, 500);
       break;
 
     case 'note':
@@ -1063,16 +1081,17 @@ let muted = false;
 
 function speak(text){
   const clean = cleanForSpeech(text);
-  if (muted || !clean){ (duckWakeSong(false), setState('done','ready')); return Promise.resolve(); }
+  if (muted || !clean){ duckWakeSong(false); return Promise.resolve(); }
   suppress = true;
   setState('speaking','speaking');
   duckWakeSong(true);              // drop the wake track under the voice
+  if (pendingWakeLinks){ pendingWakeLinks = false; openWakeLinks(); }
 
   // Demo mode keeps the fish.audio badge (it reflects the real config) but has
   // no server to synthesise with, so it falls through to browser speech.
   if (RT.tts && !DEMO) return speakViaFish(chunkForSpeech(clean));
   if (RT.browserTts && speechSynth) return speakViaBrowser(clean.slice(0, 700));
-  (duckWakeSong(false), setState('done','ready'));
+  duckWakeSong(false);
   return Promise.resolve();
 }
 
@@ -1100,7 +1119,7 @@ async function speakViaFish(chunks){
   } catch (e){
     log('error','VOICE', 'speech synthesis failed — ' + String(e.message || e).slice(0,120));
   }
-  (duckWakeSong(false), setState('done','ready'));
+  duckWakeSong(false);
 }
 
 function speakViaBrowser(text){
@@ -1109,9 +1128,9 @@ function speakViaBrowser(text){
       speechSynth.cancel();
       const u = new SpeechSynthesisUtterance(text);
       u.rate = 0.98; u.pitch = 0.85;
-      u.onend = u.onerror = () => { (duckWakeSong(false), setState('done','ready')); res(); };
+      u.onend = u.onerror = () => { duckWakeSong(false); res(); };
       speechSynth.speak(u);
-    } catch(_){ (duckWakeSong(false), setState('done','ready')); res(); }
+    } catch(_){ duckWakeSong(false); res(); }
   });
 }
 
@@ -1130,7 +1149,52 @@ let floorSum = 0, floorN = 0, threshold = 0.02, peak = 0, calibrating = true;
 const SILENCE = 900, MIN_TURN_MS = 350, MAX_TURN_MS = 18000, NO_SPEECH_MS = 10000;
 
 async function micToggle(){
-  if (convo) return stopConvo();
+  if (convo) return goStandby();
+  holdListen = true;
+  await startConvo();
+}
+
+function micButton(on, label){
+  const b = $('#mic');
+  b.classList.toggle('on', on);
+  b.querySelector('.tlabel').textContent = label;
+  if (on) micMeter.kick();
+}
+
+function goStandby(){
+  holdListen = false;
+  try { bus.out?.pause(); } catch(_){}
+  speechSynth?.cancel();
+  stopConvo();
+}
+
+function afterTurn(){
+  suppress = false;
+  duckWakeSong(false);
+  if (dormantOn || waking || running) return;
+  if (holdListen) resumeListening();
+  else setState('standby','awaiting uplink');
+}
+
+function resumeListening(){
+  if (dormantOn || waking || running || !holdListen) {
+    if (!convo) setState('standby','awaiting uplink');
+    return;
+  }
+  suppress = false;
+  if (convo) {
+    if (recognition){ try { recognition.onend = null; recognition.stop(); } catch(_){} recognition = null; }
+    micButton(true, 'Listening');
+    setState('listening','listening…');
+    if (RT.stt) beginTurn();
+    else startBrowserRecognition();
+    return;
+  }
+  startConvo();
+}
+
+async function startConvo(){
+  if (convo) { resumeListening(); return; }
 
   if (RT.stt){
     try {
@@ -1141,28 +1205,22 @@ async function micToggle(){
       return;
     }
     attachMic(micStream);
-    convo = true; suppress = false;
+    convo = true; suppress = false; holdListen = true;
     micButton(true, 'Listening');
-    log('voice','VOICE','fish.audio conversation open · listening');
+    log('voice','VOICE','conversation open · listening');
     beginTurn();
     return;
   }
 
   if (SpeechRecognition){
-    convo = true; suppress = false;
+    convo = true; suppress = false; holdListen = true;
     micButton(true, 'Listening');
     log('voice','VOICE','browser speech recognition open · listening');
-    setState('listening','browser speech online');
+    setState('listening','listening…');
     startBrowserRecognition();
     return;
   }
   log('error','VOICE','no speech recognition available — add FISH_AUDIO_API_KEY, or use Chrome');
-}
-
-function micButton(on, label){
-  const b = $('#mic');
-  b.classList.toggle('on', on);
-  b.querySelector('.tlabel').textContent = label;
 }
 
 function stopConvo(){
@@ -1202,7 +1260,7 @@ function startBrowserRecognition(){
     if (!convo) return;
     if (!text){ if (!suppress) setTimeout(startBrowserRecognition, 250); return; }
     await sendVoiceTurn(text);
-    if (convo) setTimeout(startBrowserRecognition, 350);
+    // transmit() calls afterTurn() → resumeListening(); do not double-start here
   };
 
   setState('listening','browser speech online');
@@ -1288,12 +1346,11 @@ async function ship(){
     }
     log('voice','VOICE',`transcribed in ${Math.round(performance.now() - t0)}ms: "${text}"`);
     await sendVoiceTurn(text);
-    suppress = false;
-    if (convo) beginTurn();
+    // afterTurn() re-arms the mic when the reply is done
   } catch(e){
     log('error','VOICE','transcription failed');
     suppress = false;
-    if (convo) beginTurn(); else setState('fault','transcription failed');
+    if (convo && holdListen) beginTurn(); else if (!convo) setState('fault','transcription failed');
   }
 }
 
@@ -1303,7 +1360,6 @@ async function sendVoiceTurn(text){
   $('#input').value = ''; disarm();
   log('send','SEND', full);
   await transmit(full);
-  suppress = false;
 }
 
 /* ══════════════ 8. commands ══════════════ */
@@ -1432,8 +1488,8 @@ document.addEventListener('keydown', e => {
     return;
   }
   if (e.key === 'Escape'){
-    if (running) return cancelRun();
-    if (convo) return stopConvo();
+    if (running) cancelRun();
+    if (convo || holdListen) return goStandby();
     if (DRAWERS.some(drawerOpen)) closeAllDrawers();
   }
 });
@@ -1493,7 +1549,7 @@ setInterval(async () => {
     const j = await api('/api/jobs', {headers:headers()}).then(r => r.json());
     for (const d of (j.done || [])){
       log('complete','MISSION', `${d.mission} → ${(d.result || '').slice(0,200)}`);
-      if (!running) speak(`Mission complete. ${(d.result || '').slice(0,300)}`);
+      if (!running) speak(`Mission complete. ${(d.result || '').slice(0,300)}`).then(afterTurn);
     }
   } catch(_){}
 }, 4000);
@@ -1537,6 +1593,7 @@ let WAKE_IDLE_MS = 4.5 * 60 * 60 * 1000;
 
 let dormantOn = false, waking = false, wakeActive = false, wakeRecognition = null;
 let lastActivity = Date.now();
+let pendingWakeLinks = false;
 
 function enterDormant(){
   if (!SpeechRecognition){
@@ -1544,6 +1601,8 @@ function enterDormant(){
     setState('standby','awaiting uplink');
     return;
   }
+  holdListen = false;
+  if (convo) stopConvo();
   dormantOn = true;
   $('#dormant').hidden = false;
   $('#dormant').classList.remove('waking');
@@ -1591,11 +1650,10 @@ function armWakeRecognizer(){
 function handleWake(){
   if (!dormantOn || waking) return;
   waking = true;                   // holds off the idle re-arm mid-sequence
+  holdListen = true;               // briefing → listen → reply → listen, until Control
   exitDormant();
   log('voice','WAKE','wake phrase heard');
-  // Open links when the greeting starts ("Welcome home, sir."), not immediately.
-  // This avoids opening tabs before the agent actually speaks.
-  wakeLinksOpened = false;
+  pendingWakeLinks = true;
 
   setTimeout(() => {
     playWakeSong();                // deliberately not awaited
@@ -1722,19 +1780,14 @@ setInterval(() => {
       && Date.now() - lastActivity >= WAKE_IDLE_MS) enterDormant();
 }, 5 * 60 * 1000);
 
-/* ══════════════ 10c. push-to-talk — long-press Control ══════════════
-   Hold Control past a short threshold to arm the mic; it stops the instant
-   you release the key OR the instant you stop talking, whichever comes
-   first — no 900ms silence tax like the continuous conversation loop uses.
-   A tap that doesn't clear the threshold does nothing, so it can't be
-   triggered by an accidental brush of the key.
+/* ══════════════ 10c. Control — hang up / wake ══════════════
+   While the HUD is awake and listening (or speaking), a Control tap hangs up
+   and returns to standby. While dormant, a long-press still wakes it — the
+   keyboard fallback for the wake phrase. Control+K and other chords are
+   ignored so the command palette keeps working. */
 
-   Same key, second job: if the HUD is dormant when Control is long-pressed,
-   it wakes instead of arming the mic — the keyboard fallback for whenever the
-   wake phrase doesn't land (background noise, a cold, whatever). */
-
-const PTT_HOLD_MS = 320;      // how long Control must be held to count as a long-press
-const PTT_SILENCE_MS = 220;   // near-instant endpointing once armed
+const PTT_HOLD_MS = 320;      // dormant wake long-press
+const PTT_SILENCE_MS = 220;
 const PTT_CALIBRATE_MS = 140;
 const PTT_MAX_MS = 15000;
 
@@ -1742,23 +1795,33 @@ let pttTimer = null, pttArmed = false, pttStream = null, pttRecorder = null, ptt
 let pttRecognition = null, pttVad = null, pttSpoke = false, pttLoudAt = 0, pttStartedAt = 0;
 let pttThreshold = 0.02, pttCalibrating = true, pttFloorSum = 0, pttFloorN = 0;
 
+let ctrlHeld = false, ctrlChord = false;
+
 document.addEventListener('keydown', e => {
-  if (e.key !== 'Control' || e.repeat) return;
-  if (running || waking || pttArmed || pttTimer) return;
-  if (!dormantOn && convo) return;                // already listening continuously
-  pttTimer = setTimeout(() => {
-    pttTimer = null;
-    if (dormantOn) handleWake(); else startPTT();
-  }, PTT_HOLD_MS);
+  if (e.key === 'Control'){
+    if (e.repeat) return;
+    ctrlHeld = true; ctrlChord = false;
+    if (dormantOn && !pttTimer){
+      pttTimer = setTimeout(() => { pttTimer = null; handleWake(); }, PTT_HOLD_MS);
+    }
+    return;
+  }
+  if (ctrlHeld) ctrlChord = true;
 });
 document.addEventListener('keyup', e => {
   if (e.key !== 'Control') return;
+  ctrlHeld = false;
   if (pttTimer){ clearTimeout(pttTimer); pttTimer = null; }
   if (pttArmed) stopPTT();
+  if (ctrlChord || dormantOn || waking) return;
+  if (convo || running || holdListen || stateName === 'speaking' || stateName === 'listening'){
+    if (running) cancelRun();
+    goStandby();
+    log('voice','VOICE','Control — standby');
+  }
 });
-// A held key with no matching keyup (alt-tab, a browser dialog stealing
-// focus) must not leave the mic stuck open.
 window.addEventListener('blur', () => {
+  ctrlHeld = false; ctrlChord = false;
   if (pttTimer){ clearTimeout(pttTimer); pttTimer = null; }
   if (pttArmed) stopPTT();
 });
