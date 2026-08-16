@@ -1,74 +1,45 @@
 # SUPERMAKS · Hermes Mission Control
 
-A local, voice-driven HUD for [Hermes Agent](https://github.com/NousResearch/hermes-agent)
-that runs on a Linux machine and **drives a Mac over SSH**.
+A voice-first HUD for [Hermes Agent](https://github.com/NousResearch/hermes-agent),
+running on your Mac. One arc reactor on screen, a wake phrase, and a Jarvis-shaped
+assistant behind it.
 
 It is a visual interface over your existing Hermes profile — not a second agent
 runtime — so it inherits the same tools, skills, memory, browser automation, MCP
-servers, and third-party integrations. On top of that it adds a Mac bridge: a set
-of `mac-*` commands Hermes can call to script, screenshot, type into, and click
-around a second machine on the same network.
+servers, and third-party integrations. Hermes drives the machine it is already
+on, with whatever it is connected to.
 
-Open `preview.html` (or `ui/index.html`) in a browser to see the interface
-immediately — with no key, no Hermes, and no Mac, it boots against a mock backend.
-
----
-
-## How the two machines fit together
-
-```
-  ┌── Ubuntu laptop ────────────────────────────┐        ┌── Mac ─────────────┐
-  │                                             │        │                    │
-  │  Hermes Agent ── tools/mac-*  ──── ssh ─────┼───────▶│  Remote Login      │
-  │       ▲                                     │        │  osascript         │
-  │       │ subprocess                          │        │  screencapture     │
-  │  server.py ── mac.py ─────────── ssh ───────┼───────▶│  cliclick          │
-  │       │                                     │        │                    │
-  │  127.0.0.1:8730 (HUD)                       │        │  browser ◀── ssh   │
-  └───────┼─────────────────────────────────────┘        │       -L tunnel    │
-          └────────────────────────────────────── ───────┴────────────────────┘
-```
-
-Two separate paths reach the Mac, on purpose:
-
-- **`mac.py`** backs the dashboard's Mac panel. It can only run the fixed,
-  named actions in `mac.ACTIONS` — lock, mute, volume, screenshot, status. A
-  click in the browser can never compose a shell command.
-- **`tools/mac-*`** are on Hermes' `PATH`. *Hermes* uses these, and — because
-  `mac-sh` and `mac-osa` are genuinely general-purpose, the same power as
-  sitting at the Mac's own terminal — every call through them passes a
-  confirmation gate first. See **Guardrails** below.
-
-## Prerequisites
-
-1. Linux or macOS with Python 3 and a modern browser.
-2. Hermes Agent installed and configured:
-
-```bash
-curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash
-hermes setup
-```
-
-Confirm `hermes chat -q "Say online"` works before installing the dashboard.
+Open `preview.html` (or `ui/index.html`) in a browser to see the interface right
+now — with no key and no Hermes, it boots against a mock backend.
 
 ---
 
 ## Install
 
+Needs Python 3, a Chromium-based browser, and Hermes Agent working first:
+
 ```bash
-git clone https://github.com/<you>/supermaks-hermes-dashboard.git && \
-cd supermaks-hermes-dashboard && \
+curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash
+hermes setup
+hermes chat -q "Say online"          # must work before going further
+```
+
+Then:
+
+```bash
+git clone https://github.com/Devaansh2610/SuperMaks_hermes.git
+cd SuperMaks_hermes
 ./install.sh
 ```
 
 The installer creates a private `.env`, launches the dashboard, and opens
-<http://127.0.0.1:8730>.
+<http://127.0.0.1:8730>. Add your Fish Audio key to `.env` and restart for
+proper speech.
 
-No keys are required to start — browser speech APIs are the fallback.
+## Voice
 
-## Voice — Fish Audio
-
-Add a key to `.env` for proper speech in both directions:
+**Speech out — Fish Audio.** **Speech in — the browser's own recognizer**, which
+is free, local to the page, and needs no key.
 
 ```bash
 FISH_AUDIO_API_KEY=your_private_key
@@ -76,237 +47,81 @@ FISH_AUDIO_MODEL=s2.1-pro-free
 FISH_AUDIO_VOICE_ID=612b878b113047d9a770c069c8b4fdfe
 ```
 
-`MODEL` and `VOICE_ID` are different things and are sent in different places —
-the model as an HTTP header, the voice as `reference_id` in the body. Swapping
-them produces a confusing 422.
+`MODEL` and `VOICE_ID` are different things sent in different places — the model
+as an HTTP header, the voice as `reference_id` in the body. Swapping them
+produces a confusing 422.
 
-| | |
-|---|---|
-| TTS | `POST https://api.fish.audio/v1/tts` → mp3 |
-| STT | `POST https://api.fish.audio/v1/asr` → transcript |
+The key never leaves the server: the browser asks `/api/speak` for audio and gets
+mp3 bytes back, so it never appears in devtools or a screen recording. Replies
+are synthesised **sentence by sentence** with one chunk prefetched, so speech
+starts while the rest is still being generated. Test the whole path with
+`/voice`.
 
-The key never leaves the server. The browser asks `/api/speak` for audio and
-gets mp3 bytes back, so nothing shows up in devtools or a screen recording.
+## Waking it up
 
-Replies are synthesised **sentence by sentence** with one chunk prefetched
-ahead, so speech starts while the rest is still being generated.
+The HUD opens **dormant** — near-black, one breathing mark — on every launch, and
+again after `WAKE_IDLE_HOURS` (default 4.5) with no prompt. While dormant it
+listens, locally in the browser, for any of several wake phrases:
 
-Check the whole path with `/voice` in the HUD.
+> **"wake up"** · **"daddy's home"** · **"SuperMaks"** · **"Maks"** ·
+> **"hey Maks"** · **"Jarvis"**
 
----
+Several, because one exact string is a single point of failure — a mishearing or
+a bit of background noise and nothing happens. Two fallbacks if the mic still
+misses: **tap the dormant screen**, or **long-press Control**.
 
-## The Mac bridge
+Waking runs `/briefing`: a live look at whatever your profile is connected to —
+mail, calendar, GitHub commits and open PRs, messages — opened with "Welcome
+home, sir," and closed with one dry, specific remark about something it actually
+saw. Not a generic joke; the whole point is that it was really looking.
 
-### 1. On the Mac
+A track plays at the same time. By default it **opens in its own YouTube tab**
+rather than playing in the page — no embedded player, no external script, and
+nothing for a browser autoplay policy to block. The greeting speaks immediately
+underneath it rather than waiting for the music to finish.
 
-System Settings → General → Sharing → **Remote Login: on**.
-Optionally `brew install cliclick` for mouse and keyboard control.
-
-### 2. On the Linux machine
-
-```bash
-./setup-mac.sh you@macbook.local
-```
-
-That generates a dedicated key, authorizes it, writes a `mac` block into
-`~/.ssh/config` with connection multiplexing, tests the link, and reports which
-macOS permissions still need granting.
-
-### 3. Grant the permissions macOS will not grant itself
-
-Shell commands work as soon as SSH does. **GUI** actions do not. macOS gates
-them behind TCC, and an SSH session is denied by default with no error message
-worth reading. On the Mac, open **System Settings → Privacy & Security** and add
-`/usr/libexec/sshd-keygen-wrapper` (⌘⇧G in the file picker to type the path) to:
-
-| Permission | Unlocks |
-|---|---|
-| Accessibility | `mac-type`, `mac-key`, `mac-click` |
-| Automation | `mac-osa`, `mac-app`, front-app detection |
-| Screen Recording | `mac-shot`, the dashboard's screenshot panel |
-
-GUI actions also need the Mac **awake and logged in at the console** — a locked
-login screen has no session to script. `caffeinate -disu` keeps it available.
-
-Verify everything at once:
+No audio file is bundled with this repo, and none ever will be — that would mean
+redistributing someone else's copyrighted recording.
 
 ```bash
-./tools/mac-status
+WAKE_SONG_SOURCE=open       # open a YouTube tab (default) · local · off
+WAKE_SONG_URL=https://...   # what to open
 ```
 
-### Guardrails
+Set `WAKE_SONG_SOURCE=local` with `WAKE_SONG_LOCAL_PATH` to stream a file you
+already own instead; it plays in-page at `WAKE_SONG_VOLUME` and ducks to
+`WAKE_SONG_DUCK` while SuperMaks is speaking.
 
-`mac-sh` runs arbitrary shell; `mac-osa` runs arbitrary AppleScript. Both are
-as powerful as sitting at the Mac in person, so both pass through
-`tools/mac-guard.sh` before ssh is ever called:
+## Talking to it
 
-| Verdict | Example | What happens |
-|---|---|---|
-| **SAFE** | `ls`, `open -a Safari`, `sw_vers` | runs immediately |
-| **CONFIRM** | `rm`, `sudo …`, `mv`, `killall`, `chmod -R`, `curl \| sh` | files a request and **blocks** until a human clicks Approve or Deny in the dashboard, or it times out (`MAC_APPROVAL_TIMEOUT`, default 90s) |
-| **DENY** | `rm -rf /`, `diskutil erase…`, `dd if=…`, disabling SIP | refused outright — no confirmation can override it |
+Once awake, **long-press Control** — 320ms, so a stray tap does nothing — arms
+push-to-talk. It stops on whichever comes first: releasing the key, or 220ms of
+silence. **Clicking the reactor** starts and stops a continuous conversation.
 
-This is enforced in the shell script itself, not in the model's instructions —
-Hermes cannot argue its way past a check that runs before it gets a chance to.
-A pending request shows up as a card in the top-right of the HUD with the
-exact command and a one-line reason; nothing runs until you decide. Set
-`MAC_CONFIRM_MODE=all` in `.env` to gate every `mac-sh`/`mac-osa` call, not
-just the risky ones, or `off` to disable the gate entirely (not recommended).
+## The screen
 
-**What the gate does not cover:** `mac-type` + `mac-key` can type text into
-whatever window has focus and press Return — including a Terminal window, if
-one happens to be open and focused. That's an inherent property of giving an
-agent keyboard control at all, not something a command-text filter can catch.
-If that risk matters to you, run with `MAC_CONFIRM_MODE=all` and keep an eye
-on the event stream while a session is active.
+Only the reactor. Everything else is off-canvas behind slim edge handles:
+**COMMANDS** left, **TELEMETRY** right, **TRANSCRIPT** bottom — or keys `1`/`2`/`3`,
+`Esc` to close. Nothing opens on its own. A single caption line under the reactor
+shows what is being said, so the minimal view still keeps you informed.
 
-### The tools Hermes gets
-
-| Command | Does |
-|---|---|
-| `mac-sh <cmd>` | any shell command on the Mac |
-| `mac-osa '<applescript>'` | script any Mac application |
-| `mac-app <name>` | bring an app to the front |
-| `mac-open <url\|path>` | open a URL, file, or app |
-| `mac-say <text>` | speak out of the Mac's speakers |
-| `mac-type <text>` | type into whatever is focused |
-| `mac-key <combo>` | `cmd+t`, `cmd+shift+4`, `return`, `esc`… |
-| `mac-click <x> <y>` | click at coordinates (needs cliclick) |
-| `mac-shot [path]` | screenshot, pulled back locally |
-| `mac-status` | front app, battery, volume, uptime, permissions |
-
-`start.sh` puts `./tools` on `PATH` for the dashboard's own Hermes subprocess.
-To use them from a Hermes session you start yourself, add to your shell rc:
-
-```bash
-export PATH="/path/to/supermaks-hermes-dashboard/tools:$PATH"
-```
-
----
-
-## Watching it from the Mac
-
-The server binds `127.0.0.1` only. **Do not expose the port on the LAN** — apart
-from the obvious, it breaks two things:
-
-1. The server validates the `Host` header and same-origin on every
-   state-changing request, so a `192.168.x.x` origin is rejected outright.
-2. Browsers only grant microphone access on a **secure context**. Plain `http://`
-   on a LAN IP is not one, so `getUserMedia` is blocked and voice dies.
-   `localhost` *is* treated as secure.
-
-Use an SSH tunnel instead. From the **Mac**:
-
-```bash
-ssh -N -L 8730:127.0.0.1:8730 you@ubuntu.local
-```
-
-Then open <http://127.0.0.1:8730> on the Mac. No code changes, every security
-check satisfied, microphone works.
-
-To keep it up automatically, save this as
-`~/Library/LaunchAgents/com.supermaks.tunnel.plist` and
-`launchctl load` it:
-
-```xml
-<?xml version="1.0" encoding="UTF-8"?>
-<plist version="1.0"><dict>
-  <key>Label</key><string>com.supermaks.tunnel</string>
-  <key>ProgramArguments</key>
-  <array>
-    <string>/usr/bin/ssh</string><string>-N</string>
-    <string>-o</string><string>ServerAliveInterval=30</string>
-    <string>-o</string><string>ExitOnForwardFailure=yes</string>
-    <string>-L</string><string>8730:127.0.0.1:8730</string>
-    <string>you@ubuntu.local</string>
-  </array>
-  <key>RunAtLoad</key><true/>
-  <key>KeepAlive</key><true/>
-</dict></plist>
-```
-
----
-
-## The wake phrase
-
-The HUD opens dormant — near-black, a slow breathing mark, nothing else — on
-every launch, and again after `WAKE_IDLE_HOURS` (default 4.5) of no prompt, so
-a laptop left running all day drops back into "asleep, waiting to be woken" on
-its own rather than staying lit forever.
-
-Say **"wake up daddy's home"** at that screen and SuperMaks wakes and runs
-`/briefing`: a live check of your mail and calendar, opened with "Welcome home,
-sir," followed by one dry aside about whatever's actually on today's calendar,
-then an offer — never an action — on the emails. Two fallbacks if the mic
-doesn't catch it: tap the dormant screen, or long-press Control — the same key
-that drives push-to-talk once you're awake doubles as the keyboard wake trigger
-while dormant.
-
-Between hearing the phrase and answering, it plays **"Should I Stay or Should
-I Go" by The Clash**, from the top, for up to `WAKE_SONG_SECONDS` (default
-105s — about a minute forty-five). Three ways to source it, set in `.env`:
-
-```bash
-WAKE_SONG_SOURCE=youtube              # default — nothing downloaded or stored
-WAKE_SONG_YOUTUBE_ID=xMaE6toi4mk      # the official video, embedded client-side
-
-# or, to use a copy you already own instead of YouTube:
-WAKE_SONG_SOURCE=local
-WAKE_SONG_LOCAL_PATH=/home/you/Music/should-i-stay-or-should-i-go.mp3
-
-# or skip it entirely:
-WAKE_SONG_SOURCE=off
-```
-
-No audio file ships with this repo, and none ever will — that would mean
-redistributing someone else's copyrighted recording via git, which isn't
-something this project does. `youtube` embeds the video the same way any
-webpage embeds a YouTube player; `local` streams a file already sitting on
-your machine, gated behind the same session token as everything else. A Skip
-button is always available if you'd rather move straight to the briefing.
-
-Autoplay triggered from a voice callback (rather than a click) is something
-browsers are free to block, so this never holds the greeting hostage — it
-gives the song a few seconds to actually start and moves on regardless if it
-doesn't.
-
-Say the phrase once and the wake listener turns itself off until the calendar
-date changes — see the *Voice-first* behavior below for the mechanics.
-
-## Voice-first: wake phrase, briefing, push-to-talk
-
-The HUD boots into **dormant** — no HUD, no lines, just a slow breathing mark
-on black — every time it's opened, and listens, locally in the browser, only
-for the wake phrase. It never touches Fish Audio for this: streaming your mic
-to a paid endpoint continuously to catch one phrase would be slow and
-wasteful, and the browser's own recognizer does it for free, running only
-while dormant rather than all the time in between.
-
-Say the phrase, tap the screen, or long-press Control, and it fires
-`/briefing`. Wake-phrase listening then turns off — nothing is listening in
-the background — until `WAKE_IDLE_HOURS` passes with no prompt sent, at which
-point it re-arms itself on its own, even if the tab's been open the whole time.
-
-Once awake, the same **long-press Control** — 320ms, so a stray tap does
-nothing — becomes push-to-talk instead of a wake trigger: it arms the mic and
-stops on whichever comes first, releasing the key or 220ms of silence, instead
-of the continuous conversation loop's 900ms tail. Requires a Chromium-based
-browser for the wake phrase, the dormant screen, and Control's browser-STT
-fallback path (same limitation the STT fallback already had). Without it the
-HUD skips dormant entirely and opens straight to standby — no wake ritual, no
-Control-to-wake — but push-to-talk still works via Fish Audio if configured,
-and the Voice button and typing work everywhere regardless.
+The reactor is a machined object, not a logo: brushed-metal housing with bolts
+and engraved graduations, a 72-tooth ring gear, seven orbiting planetary gears on
+carrier arms, reciprocating actuators, a stepper-indexed collar, a ten-winding
+coil pack with sliding armature caps, tilting stator vanes, a turbine behind the
+plasma, and arc discharge. The coils, spectrum ring and core are driven by real
+audio — your microphone while listening, the speech playback while talking — so
+it is an instrument rather than a screensaver.
 
 ## Command matrix
 
-Every button runs its base command immediately. Commands that take a payload
-stay **armed**, so the next thing you type or say is sent as `/command payload`.
+Buttons run their command immediately. Commands taking a payload stay **armed**,
+so the next thing you type or say is sent as `/command payload`.
 
 | Command | Action |
 |---|---|
 | `/new` | Start a fresh Hermes thread |
-| `/mac <task>` | Do something on the Mac; bare `/mac` reads its status |
-| `/screen` | Capture the Mac screen into the HUD |
+| `/briefing` | The wake report, on demand |
 | `/browser <task>` | Use Hermes' browser/Chrome tools |
 | `/goal <text\|status\|clear>` | Set, read, or clear the standing objective |
 | `/background <mission>` | Run a Hermes mission asynchronously |
@@ -316,15 +131,11 @@ stay **armed**, so the next thing you type or say is sent as `/command payload`.
 | `/tools`, `/toolsets` | What Hermes can currently reach |
 | `/connectors`, `/connect <name>` | How integrations are inherited |
 | `/voice` | Test the Fish Audio path end to end |
-| `/status` | Runtime, profile, Mac, and voice state |
+| `/status` | Runtime, profile and voice state |
 | `/commands` | Show everything |
 
-Anything else goes straight to Hermes.
-
-**Keyboard:** `⌘K` / `Ctrl+K` command palette · `⌘↵` transmit · `Esc` cancel a
-run, close the palette, or end the voice conversation.
-
----
+Anything else goes straight to Hermes. **Keyboard:** `⌘K` palette · `⌘↵` transmit ·
+`Esc` cancel a run, close the palette, or end the conversation.
 
 ## Architecture
 
@@ -332,16 +143,14 @@ run, close the palette, or end the voice conversation.
 ui/            dependency-free HUD — canvas reactor, streaming, voice loop
 server.py      local HTTP API and NDJSON streaming
 runtime.py     Hermes CLI subprocess and session continuity
-commands.py    slash commands, mission queue, the Mac briefing injected into prompts
-voice.py       Fish Audio TTS + ASR
-mac.py         the Mac bridge used by the dashboard panel
-tools/mac-*    the Mac bridge used by Hermes itself
+commands.py    slash commands and the mission queue
+voice.py       Fish Audio speech synthesis
 persona.md     the spoken SuperMaks persona
-setup-mac.sh   one-shot SSH + permissions setup
+build-preview.py  bundles ui/ into the single-file preview
 ```
 
-The HUD ships no fonts and no libraries — it has to work on a machine bound to
-`127.0.0.1` with the network unplugged.
+No fonts, no libraries, no CDN — it has to work bound to `127.0.0.1` with the
+network unplugged.
 
 ## Configuration
 
@@ -350,57 +159,51 @@ The HUD ships no fonts and no libraries — it has to work on a machine bound to
 | `FISH_AUDIO_API_KEY` | — | enables server-side speech |
 | `FISH_AUDIO_MODEL` | `s2.1-pro-free` | synthesis engine |
 | `FISH_AUDIO_VOICE_ID` | `612b878b…` | voice `reference_id` |
-| `WAKE_SONG_SOURCE` | `youtube` | `youtube`, `local`, or `off` |
-| `WAKE_SONG_YOUTUBE_ID` | `xMaE6toi4mk` | video embedded on wake |
-| `WAKE_SONG_LOCAL_PATH` | — | a file you own, used when source is `local` |
-| `WAKE_SONG_SECONDS` | `105` | how long the jingle plays before it's cut |
-| `WAKE_IDLE_HOURS` | `4.5` | hours of no prompt before dormant mode re-arms itself |
-| `MAC_ENABLED` | `1` | switch the Mac bridge off entirely |
-| `MAC_SSH_HOST` | `mac` | ssh alias or `user@host` |
-| `MAC_SHOT_PX` | `1100` | screenshot long edge |
-| `MAC_CONFIRM_MODE` | `risky` | `risky` gates destructive commands, `all` gates every `mac-sh`/`mac-osa` call, `off` disables the gate |
-| `MAC_APPROVAL_TIMEOUT` | `90` | seconds a blocked action waits for a decision before it's treated as denied |
+| `WAKE_SONG_SOURCE` | `open` | `open`, `local`, or `off` |
+| `WAKE_SONG_URL` | The Clash | what `open` opens |
+| `WAKE_SONG_VOLUME` / `_DUCK` | `0.35` / `0.10` | local playback level, and level while speaking |
+| `WAKE_IDLE_HOURS` | `4.5` | hours of quiet before it goes dormant again |
 | `HERMES_PROFILE` | `default` | profile whose tools are inherited |
 | `HERMES_CMD` | — | absolute path if `hermes` is not on `PATH` |
+| `SUPERMAKS_MODEL` | — | passed to `hermes --model`; use a fast one, latency matters |
 | `SUPERMAKS_PORT` | `8730` | dashboard port |
 | `SUPERMAKS_PERMISSION` | `normal` | `bypass` lets Hermes run tools unprompted |
 | `SUPERMAKS_TIMEOUT` | `120` | seconds of silence before a run is killed |
-| `SUPERMAKS_WORKDIR` | `~` | agent working directory |
 
 Old `JARVIS_*` variables are still read as a fallback.
 
 ## Security
 
 - The server binds `127.0.0.1`; it is never exposed to the network.
-- Every state-changing request needs a per-launch random token, same-origin,
-  a valid localhost `Host`, an approved content type, and a bounded body.
-- The browser can name a Mac action, never compose one. Free-form Mac control
-  exists only in `tools/`, where Hermes — not the page — decides.
-- Remote scripts are base64-encoded in transit, so nothing is re-parsed by a
-  shell at the far end.
+- Every state-changing request needs a per-launch random token, same-origin, a
+  valid localhost `Host`, an approved content type, and a bounded body.
 - Agent runs are serialized so multiple tabs cannot race the Hermes session.
 - Raw prompt logging is off unless `SUPERMAKS_RAW_LOG` is set; opt-in logs are
   created `0600` with symlink protection.
-- `.env`, state files, keys, and caches are git-ignored.
-- The Mac key is dedicated to this bridge and set `IdentitiesOnly yes`.
+- `.env`, state files and caches are git-ignored.
+
+Hermes runs with your account's reach on this machine. `SUPERMAKS_PERMISSION`
+decides whether it asks before using a tool — `normal` is the default for a
+reason.
 
 ## Troubleshooting
 
-**Hermes not found** — `which hermes`, `hermes doctor`, then set `HERMES_CMD` in `.env`.
+**Hermes not found** — `which hermes`, `hermes doctor`, then set `HERMES_CMD`.
 
-**Microphone does nothing** — you are almost certainly on a LAN IP rather than
-localhost. Use the SSH tunnel above.
+**Wake phrase never fires** — needs a Chromium-based browser; Safari and Firefox
+have no continuous `SpeechRecognition`. Control and the Voice button still work.
 
-**Mac panel says unreachable** — `ssh mac true` from a terminal. If that prompts
-for a password, re-run `./setup-mac.sh`.
+**Microphone does nothing** — it must be `localhost`, not a LAN IP; a plain-http
+LAN origin is not a secure context and the browser blocks the mic outright.
 
-**Front app shows "blocked"** — the TCC permissions above are not granted yet.
+**Replies take forever** — a heavy reasoning model will never feel like a voice
+assistant. Set `SUPERMAKS_MODEL` to something faster.
 
-**A newly connected tool is missing** — Hermes caches per session. Run `/new`.
+**A newly connected tool is missing** — Hermes caches per session; run `/new`.
 
 ## Credits and license
 
 Adapted from [`Itsme23476/jarvis-hermes-dashboard`](https://github.com/Itsme23476/jarvis-hermes-dashboard),
 itself inspired by [`Itsme23476/jarvis-os`](https://github.com/Itsme23476/jarvis-os).
-Rebranded as SuperMaks, moved from ElevenLabs to Fish Audio, given a new HUD, and
-extended with the Mac bridge. Released under the MIT License; see [LICENSE](LICENSE).
+Rebranded as SuperMaks, moved from ElevenLabs to Fish Audio, and given a new HUD.
+Released under the MIT License; see [LICENSE](LICENSE).

@@ -351,7 +351,6 @@ body.open-bottom .drawer.bottom{ transform:translateX(-50%); }
 .tbtn.off{ opacity:.5; }
 
 /* ── wake-phrase jingle ─────────────────────────────────── */
-#wakeSongHost{ position:fixed; width:1px; height:1px; opacity:0; pointer-events:none; overflow:hidden; }
 #songBanner{
   position:fixed; z-index:26; top:calc(var(--bar-h) + 10px); left:50%; transform:translateX(-50%);
   display:flex; align-items:center; gap:10px;
