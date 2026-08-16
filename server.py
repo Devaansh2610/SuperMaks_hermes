@@ -69,7 +69,7 @@ WAKE_SONG_URL = env("WAKE_SONG_URL", "https://www.youtube.com/watch?v=xMaE6toi4m
 # wake opens goes through one code path and one popup-blocker fallback.
 WAKE_TABS = [u.strip() for u in env(
     "WAKE_TABS",
-    "https://github.com/,https://www.netflix.com/,https://medium.com/tag/ai-research"
+    "https://www.youtube.com/watch?v=xMaE6toi4mk&list=RDxMaE6toi4mk&start_radio=1,https://build.nvidia.com/models,https://www.langchain.com/blog"
 ).split(",") if u.strip()]
 
 # The HUD goes dormant (wake-phrase-only) on every launch, and re-arms itself

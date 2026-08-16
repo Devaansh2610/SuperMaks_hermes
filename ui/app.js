@@ -44,7 +44,6 @@ const STATES = {
   transcribing: ['TRANSCRIBING', 'thinking'],
   thinking:     ['THINKING',     'thinking'],
   speaking:     ['SPEAKING',     'speaking'],
-  done:         ['COMPLETE',     'done'],
   fault:        ['FAULT',        'fault'],
 };
 let stateName = 'standby';
@@ -989,7 +988,16 @@ function handleEvent(ev){
       log('complete','COMPLETE', ev.ms != null ? `run completed in ${ev.ms}ms` : 'run completed');
       renderAnswer(true);
       speakDone = speakThisRun ? speak(answer)
-                               : ((duckWakeSong(false), setState('done','ready')), Promise.resolve());
+                               : ((duckWakeSong(false), setState('listening','listening…')), Promise.resolve());
+      // After briefing, start continuous listening mode
+      setTimeout(() => {
+        if (!convo && !suppress && SpeechRecognition && !running) {
+          convo = true; suppress = false;
+          micButton(true, 'Listening');
+          setState('listening','listening…');
+          startBrowserRecognition();
+        }
+      }, 500);
       break;
 
     case 'error':
@@ -998,6 +1006,15 @@ function handleEvent(ev){
       log('error','ERROR', ev.message || 'unknown');
       if (!answer) $('#response').innerHTML = `<span class="fault">⚠ ${esc(ev.message || 'Run failed.')}</span>`;
       else renderAnswer(true);
+      // After error, start continuous listening mode
+      setTimeout(() => {
+        if (!convo && !suppress && SpeechRecognition && !running) {
+          convo = true; suppress = false;
+          micButton(true, 'Listening');
+          setState('listening','listening…');
+          startBrowserRecognition();
+        }
+      }, 500);
       break;
 
     case 'note':
@@ -1576,14 +1593,9 @@ function handleWake(){
   waking = true;                   // holds off the idle re-arm mid-sequence
   exitDormant();
   log('voice','WAKE','wake phrase heard');
-  // The song and the greeting run TOGETHER. Awaiting the song meant standing
-  // in silence through a minute of music before SuperMaks said a word — the
-  // reactor sat in `thinking` the whole time. Now the music starts, the
-  // briefing is dispatched immediately underneath it, and the track ducks
-  // out of the way the moment there's speech to hear.
-  // Opened immediately, in this tick: deferring would drop the user gesture
-  // that lets the browser allow them at all.
-  openWakeLinks();
+  // Open links when the greeting starts ("Welcome home, sir."), not immediately.
+  // This avoids opening tabs before the agent actually speaks.
+  wakeLinksOpened = false;
 
   setTimeout(() => {
     playWakeSong();                // deliberately not awaited

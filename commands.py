@@ -80,7 +80,6 @@ def context_block():
     return "\n\n".join(out)
 
 
-
 JOBS = {}
 _JOB_LOCK = threading.Lock()
 
@@ -131,7 +130,7 @@ def take_finished():
         return done
 
 
-_CMD = re.compile(r"^\s*/(new|profile|goal|personality|kanban|mission|missions|background|tools|toolsets|connectors|connect|status|commands|help|browser|clear|voice|briefing)\b\s*(.*)$", re.I | re.S)
+_CMD = re.compile(r"^\s*/(new|profile|goal|personality|kanban|mission|missions|background|tools|toolsets|connectors|connect|status|commands|help|browser|clear|voice|briefing|github)\b\s*(.*)$", re.I | re.S)
 
 
 def _hermes_command(*args):
@@ -160,6 +159,7 @@ def _commands_reply():
 /profile <fact> — add a local profile note injected into Hermes prompts
 /personality <tone> — set the SuperMaks tone overlay
 /briefing — the once-a-day wake report: unread mail and today's calendar
+/github — recent commits and repo activity
 /kanban [task] — read/add mission queue item
 /mission [task] — alias for /kanban
 /background <mission> — run a Hermes mission asynchronously
@@ -197,41 +197,48 @@ def handle(message, runner=None):
                                  os.environ.get("SUPERMAKS_PROFILE",
                                                 os.environ.get("JARVIS_PROFILE", "default")))
         runtime = os.environ.get("HERMES_CMD", "hermes")
-        vo = (f"fish.audio {voice.model()} / voice {voice.voice_id()[:8]}…"
+        vo = (f"fish.audio {voice.model()} / voice {voice.voice_id()[:8]}..."
               if voice.available() else "browser Web Speech (no FISH_AUDIO_API_KEY)")
         return dict(message=None, note="status read", reply=(
             f"SuperMaks online. profile={profile}; runtime={runtime}; "
             f"workdir={os.getcwd()}; voice={vo}."))
 
     if cmd == "briefing":
-        # Fired by the wake phrase, or manually. The opening line is fixed;
-        # everything after it is genuinely live, pulled through whatever tools
-        # and MCP servers this Hermes profile actually has connected.
+        # Hardcoded fast path: run Gmail, Calendar, and GitHub directly
+        import subprocess
+        import json
+        
+        def run_cmd(cmd_list):
+            try:
+                p = subprocess.run(cmd_list, text=True, cwd=os.getcwd(), 
+                                   stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=25)
+                return (p.stdout or p.stderr or "").strip()
+            except Exception:
+                return ""
+        
+        gmail_out = run_cmd(["python", "/Users/devaanshmakhijani/.hermes/skills/productivity/google-workspace/scripts/google_api.py", "gmail", "search", "is:unread", "--max", "50"])
+        cal_out = run_cmd(["python", "/Users/devaanshmakhijani/.hermes/skills/productivity/google-workspace/scripts/google_api.py", "calendar", "list"])
+        gh_out = run_cmd(["gh", "repo", "list", "--limit", "10", "--json", "name,updatedAt,description,url"])
+        
+        data = f"Gmail (unread):\n{gmail_out}\n\nCalendar:\n{cal_out}\n\nGitHub repos:\n{gh_out}"
+        
         return dict(message=(
-            "This is the wake briefing. Before answering, actually look — don't summarise "
-            "from memory. Survey whatever of these you have tools or MCP servers for, and "
-            "silently skip any you don't:\n"
-            "  - mail: how many new or unread messages, and who the notable ones are from\n"
-            "  - calendar: what is on today, and what is next\n"
-            "  - GitHub: recent commits, pushes, open PRs, review requests, failing checks\n"
-            "  - messages, issues, tasks, or anything else your profile is connected to\n\n"
-            "Then speak, in this shape:\n"
+            "This is the wake briefing. Data already fetched — no need to call tools again. "
+            "Here is the live data:\n\n" + data + "\n\n"
+            "Then speak in this shape:\n"
             "1. Open with exactly: \"Welcome home, sir.\"\n"
-            "2. One or two sentences carrying the one or two things that actually matter "
-            "most today. Real numbers, real names, real repo and event titles — never a "
-            "placeholder, never a round-number guess.\n"
-            "3. One dry, personal aside about something specific you noticed in that data. "
-            "This is the point of the whole briefing: it must respond to the actual content, "
-            "the way a chief of staff who reads everything would. For example, if there are "
-            "recent commits to a repo, remark on the repo by name and what the work looks "
-            "like; if the calendar is unusually empty, or unusually grim, say so. Never a "
-            "generic joke that would fit any morning.\n"
-            "4. Close with one short offer of something you could do about it — an offer, "
-            "never an action already taken.\n\n"
-            "Keep the whole thing to about four spoken sentences. If a source isn't "
-            "reachable, leave it out silently rather than narrating the gap — unless nothing "
-            "at all is reachable, in which case say that plainly in one line and stop."
-        ), note="wake briefing")
+            "2. One or two sentences with the one or two things that matter most. Real numbers, real names.\n"
+            "3. One dry, personal aside about something specific you noticed.\n"
+            "4. Close with one short offer of something you could do.\n\n"
+            "Keep it to about four spoken sentences. If nothing reachable, say so in one line."
+        ), note="wake briefing (hardcoded)")
+
+    if cmd == "github":
+        out = _shell(["gh", "repo", "list", "--limit", "10", "--json", "name,updatedAt,description,url"])
+        if out and out != "Unavailable:":
+            return dict(message=None, reply=out, note="github repos listed")
+        # fallback to generic prompt if gh not available
+        return dict(message="Show my recent GitHub activity: commits, pushes, open PRs across my repos. Keep it concise.", note="github activity requested")
 
     if cmd == "voice":
         result = voice.check()
