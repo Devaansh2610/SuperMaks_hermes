@@ -16,7 +16,6 @@ import threading
 import time
 import uuid
 
-import mac
 import voice
 
 ROOT = pathlib.Path(__file__).resolve().parent
@@ -78,31 +77,8 @@ def context_block():
     open_tasks = [t for t in d["tasks"] if not t.get("done")]
     if open_tasks:
         out.append("## Mission queue\n" + "\n".join(f"- {t['text']}" for t in open_tasks[:20]))
-    if mac.configured():
-        out.append(MAC_BRIEF)
     return "\n\n".join(out)
 
-
-# Injected into every run so the agent knows the Mac exists and how to reach it.
-# Without this it will answer "I can't control your Mac" while holding the tools.
-MAC_BRIEF = """## Your Mac
-You run on a Linux machine, but you also control the user's Mac over SSH. These
-commands are on your PATH — use your terminal tool to run them. Do not describe
-them to the user, just use them.
-
-- `mac-sh <command>`      run any shell command on the Mac
-- `mac-osa <applescript>` run AppleScript (control any scriptable Mac app)
-- `mac-app <name>`        activate an application
-- `mac-open <url|path>`   open a URL, file, or app
-- `mac-say <text>`        speak through the Mac's own speakers
-- `mac-type <text>`       type text into whatever is focused
-- `mac-key <combo>`       press a key combo, e.g. cmd+t
-- `mac-click <x> <y>`     click at screen coordinates
-- `mac-shot [path]`       screenshot the Mac and save it locally
-- `mac-status`            front app, battery, volume, uptime
-
-If one of these reports a permission error, tell the user in one line that the
-Mac needs Accessibility or Screen Recording granted, and stop."""
 
 
 JOBS = {}
@@ -155,7 +131,7 @@ def take_finished():
         return done
 
 
-_CMD = re.compile(r"^\s*/(new|profile|goal|personality|kanban|mission|missions|background|tools|toolsets|connectors|connect|status|commands|help|browser|clear|mac|screen|voice|briefing)\b\s*(.*)$", re.I | re.S)
+_CMD = re.compile(r"^\s*/(new|profile|goal|personality|kanban|mission|missions|background|tools|toolsets|connectors|connect|status|commands|help|browser|clear|voice|briefing)\b\s*(.*)$", re.I | re.S)
 
 
 def _hermes_command(*args):
@@ -187,14 +163,12 @@ def _commands_reply():
 /kanban [task] — read/add mission queue item
 /mission [task] — alias for /kanban
 /background <mission> — run a Hermes mission asynchronously
-/mac <task> — do something on the Mac over SSH
-/screen — pull a fresh screenshot of the Mac
 /tools — show Hermes tool status from `hermes tools list`
 /connectors — explain that connected Hermes tools transfer into this dashboard
 /connect <name> — ask Hermes how to connect a third-party app generally
 /toolsets — ask Hermes to list available toolsets
 /voice — test the Fish Audio voice path end to end
-/status — local Hermes runtime/profile/Mac/voice status
+/status — local Hermes runtime/profile/voice status
 /browser <task> — ask Hermes to use browser/Chrome tools
 /clear — clear the response panel locally
 /help or /commands — show this list
@@ -227,7 +201,7 @@ def handle(message, runner=None):
               if voice.available() else "browser Web Speech (no FISH_AUDIO_API_KEY)")
         return dict(message=None, note="status read", reply=(
             f"SuperMaks online. profile={profile}; runtime={runtime}; "
-            f"workdir={os.getcwd()}; voice={vo}; mac={mac.summary()}."))
+            f"workdir={os.getcwd()}; voice={vo}."))
 
     if cmd == "briefing":
         # Fired by the wake phrase, or manually. The opening line is fixed;
@@ -265,35 +239,6 @@ def handle(message, runner=None):
                     reply=("Voice path good — " if result["ok"] else "Voice path failed — ")
                           + result["detail"])
 
-    if cmd == "screen":
-        image, err = mac.screenshot()
-        if err:
-            return dict(message=None, reply=f"Couldn't see the Mac: {err}", note="screenshot failed")
-        # The HUD picks the image up from its own /api/mac/screenshot poll; here
-        # we just confirm, because this reply gets read aloud.
-        return dict(message=None, reply="Mac screen captured.", note="screenshot ok")
-
-    if cmd == "mac":
-        if not mac.configured():
-            return dict(message=None, note="mac disabled",
-                        reply="The Mac bridge is switched off. Set MAC_ENABLED=1 and MAC_SSH_HOST.")
-        if not arg:
-            s = mac.status(force=True)
-            if not s.get("reachable"):
-                return dict(message=None, note="mac unreachable",
-                            reply=f"I can't reach the Mac. {s.get('detail', '')}")
-            return dict(message=None, note="mac status", reply=(
-                f"{s.get('name', mac.HOST)} is up. "
-                + ", ".join(filter(None, [
-                    f"{s['front']} is in front" if s.get("front") else "",
-                    f"battery {s['battery']}" if s.get("battery") else "",
-                    f"volume {s['volume']}" if s.get("volume") else "",
-                    f"up {s['uptime']}" if s.get("uptime") else "",
-                ])) + "."))
-        return dict(message=(
-            f"Do this on my Mac using your mac-* tools: {arg}\n"
-            "Use mac-osa or mac-sh as appropriate. Report only the outcome, in one line."
-        ), note=f"mac mission: {arg[:50]}")
 
     if cmd in ("tools", "toolsets"):
         if cmd == "tools":

@@ -1,13 +1,13 @@
 """
-SuperMaks Live — a HUD that drives Hermes Agent, with a Mac on the end of it.
+SuperMaks Live — a HUD that drives Hermes Agent.
 
     python3 server.py
 
-The brain is your own Hermes Agent CLI/profile. Hermes keeps access to the same
-configured tools, browser/Chrome automation, MCP servers, skills, memory, and
-third-party integrations that your normal Hermes sessions have. Voice runs on
-Fish Audio when a key is present, with browser Web Speech as the fallback. The
-Mac bridge (mac.py) gives the HUD a live view of a second machine over SSH.
+Runs on the same machine as Hermes. The brain is your own Hermes CLI/profile,
+so its configured tools, browser automation, MCP servers, skills, memory and
+third-party integrations are all live — including anything it uses to drive
+this machine directly. Speech out is Fish Audio; speech in is the browser's
+own recognizer.
 """
 import json
 import mimetypes
@@ -39,7 +39,6 @@ def env(name, default=""):
 
 
 import commands         # noqa: E402
-import mac              # noqa: E402
 import runtime          # noqa: E402
 import voice            # noqa: E402
 
@@ -152,9 +151,7 @@ class Handler(BaseHTTPRequestHandler):
                 voice_provider=vs,
                 voice_model=voice.model() if voice.available() else "browser",
                 voice_id=voice.voice_id() if voice.available() else "browser",
-                stt=vs, tts=vs,
-                mac_enabled=mac.configured(),
-                mac_host=mac.HOST,
+                stt="browser", tts=vs,
                 wake_song=dict(
                     source=WAKE_SONG_SOURCE,
                     youtube_id=WAKE_SONG_YOUTUBE_ID if WAKE_SONG_SOURCE == "youtube" else "",
@@ -172,26 +169,6 @@ class Handler(BaseHTTPRequestHandler):
                                    running=[j for j in commands.jobs_snapshot()
                                             if j["status"] == "running"]))
 
-        if p == "/api/mac":
-            if not self._token_ok():
-                return self._json({"error": "unauthorized"}, 401)
-            return self._json(mac.status())
-
-        if p == "/api/wake-song":
-            if not self._token_ok():
-                return self._json({"error": "unauthorized"}, 401)
-            if WAKE_SONG_SOURCE != "local" or not WAKE_SONG_LOCAL_PATH:
-                return self._json({"error": "no local wake song configured"}, 404)
-            f = pathlib.Path(WAKE_SONG_LOCAL_PATH)
-            if not f.is_file():
-                return self._json({"error": "WAKE_SONG_LOCAL_PATH does not exist"}, 404)
-            ctype = mimetypes.guess_type(f.name)[0] or "audio/mpeg"
-            return self._bytes(f.read_bytes(), ctype)
-
-        if p == "/api/mac/approvals":
-            if not self._token_ok():
-                return self._json({"error": "unauthorized"}, 401)
-            return self._json({"pending": mac.list_approvals()})
 
         rel = "index.html" if p == "/" else p.lstrip("/")
         f = (UI / rel).resolve()
@@ -237,30 +214,6 @@ class Handler(BaseHTTPRequestHandler):
             except Exception as e:                        # noqa: BLE001
                 return self._json({"error": str(e)[:300], "text": ""}, 503)
 
-        if p == "/api/mac/screenshot":
-            image, err = mac.screenshot()
-            if err:
-                return self._json({"error": err}, 503)
-            return self._json({"image": image})
-
-        if p == "/api/mac/approvals/decide":
-            try:
-                body = json.loads(raw or b"{}")
-            except json.JSONDecodeError:
-                return self._json({"error": "bad json"}, 400)
-            ok = mac.decide_approval(body.get("id", ""), bool(body.get("approve")))
-            return self._json({"ok": ok}, 200 if ok else 404)
-
-        if p == "/api/mac/action":
-            try:
-                body = json.loads(raw or b"{}")
-            except json.JSONDecodeError:
-                return self._json({"error": "bad json"}, 400)
-            # Only names present in mac.ACTIONS get through — the browser can
-            # name an action, never compose a command.
-            result = mac.action(str(body.get("name", ""))[:40],
-                                str(body.get("arg", ""))[:400])
-            return self._json(result, 200 if result.get("ok") else 502)
 
         if p == "/api/new":
             runtime.cancel_active()
@@ -362,7 +315,6 @@ def main():
   workdir      {runtime.WORKDIR}
   permission   {perm}{perm_note}
   voice        {vo} + browser Web Speech fallback
-  mac bridge   {mac.summary()}
   wake song    {WAKE_SONG_SOURCE}{(' · ' + WAKE_SONG_YOUTUBE_ID) if WAKE_SONG_SOURCE == 'youtube' else ''}
   wake idle    dormant on launch, and again after {WAKE_IDLE_HOURS}h with no prompt
   open         http://localhost:{PORT}

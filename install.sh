@@ -35,21 +35,8 @@ EOF
   exit 1
 fi
 
-chmod +x start.sh install.sh setup-mac.sh
-chmod +x tools/mac-* 2>/dev/null || true
+chmod +x start.sh install.sh
 
-# The mac-* tools are only useful to Hermes if Hermes can find them. The
-# dashboard puts ./tools on PATH for its own child process, but a Hermes session
-# you start yourself in another terminal won't have it unless it's on your PATH.
-tools_dir="$PWD/tools"
-if ! command -v mac-sh >/dev/null 2>&1; then
-  printf '\nTo let Hermes drive the Mac from any terminal, add this to your shell rc:\n'
-  printf '  export PATH="%s:$PATH"\n' "$tools_dir"
-fi
-
-if [ ! -f "$HOME/.ssh/config" ] || ! grep -q '^Host mac$' "$HOME/.ssh/config" 2>/dev/null; then
-  printf '\nThe Mac bridge is not set up yet. Run ./setup-mac.sh when ready.\n'
-fi
 
 printf '\nSuperMaks is ready. Launching with the configured Hermes profile.\n'
 printf 'Dashboard: http://127.0.0.1:%s\n\n' "${SUPERMAKS_PORT:-8730}"
