@@ -24,7 +24,7 @@ const headers = extra => ({'x-supermaks-token': TOKEN, ...(extra || {})});
    this one line for its wrapper div, so no other code has to care. */
 const ROOT_EL = document.body;
 
-const RT = {tts:false, stt:false, browserStt:false, browserTts:false, mac:false};
+const RT = {tts:false, stt:false, browserStt:false, browserTts:false};
 const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
 const speechSynth = window.speechSynthesis;
 
@@ -74,7 +74,7 @@ function setTag(cls, text){
 const LOG_GROUP = {
   run:'agent', status:'agent', complete:'agent', latency:'agent', tool:'agent',
   note:'agent', send:'agent', command:'agent',
-  voice:'voice', mac:'mac', error:'error',
+  voice:'voice', error:'error',
 };
 let logFilter = 'all';
 
@@ -989,7 +989,7 @@ function handleEvent(ev){
       log('complete','COMPLETE', ev.ms != null ? `run completed in ${ev.ms}ms` : 'run completed');
       renderAnswer(true);
       speakDone = speakThisRun ? speak(answer)
-                               : (setState('done','ready'), Promise.resolve());
+                               : ((duckWakeSong(false), setState('done','ready')), Promise.resolve());
       break;
 
     case 'error':
@@ -1002,8 +1002,6 @@ function handleEvent(ev){
 
     case 'note':
       log('note','NOTE', ev.message || '');
-      // The server emits a note for /screen; pull the image the moment it lands.
-      if (/screenshot ok/i.test(ev.message || '')) grabScreenshot();
       break;
   }
 }
@@ -1048,15 +1046,16 @@ let muted = false;
 
 function speak(text){
   const clean = cleanForSpeech(text);
-  if (muted || !clean){ setState('done','ready'); return Promise.resolve(); }
+  if (muted || !clean){ (duckWakeSong(false), setState('done','ready')); return Promise.resolve(); }
   suppress = true;
   setState('speaking','speaking');
+  duckWakeSong(true);              // drop the wake track under the voice
 
   // Demo mode keeps the fish.audio badge (it reflects the real config) but has
   // no server to synthesise with, so it falls through to browser speech.
   if (RT.tts && !DEMO) return speakViaFish(chunkForSpeech(clean));
   if (RT.browserTts && speechSynth) return speakViaBrowser(clean.slice(0, 700));
-  setState('done','ready');
+  (duckWakeSong(false), setState('done','ready'));
   return Promise.resolve();
 }
 
@@ -1084,7 +1083,7 @@ async function speakViaFish(chunks){
   } catch (e){
     log('error','VOICE', 'speech synthesis failed — ' + String(e.message || e).slice(0,120));
   }
-  setState('done','ready');
+  (duckWakeSong(false), setState('done','ready'));
 }
 
 function speakViaBrowser(text){
@@ -1093,9 +1092,9 @@ function speakViaBrowser(text){
       speechSynth.cancel();
       const u = new SpeechSynthesisUtterance(text);
       u.rate = 0.98; u.pitch = 0.85;
-      u.onend = u.onerror = () => { setState('done','ready'); res(); };
+      u.onend = u.onerror = () => { (duckWakeSong(false), setState('done','ready')); res(); };
       speechSynth.speak(u);
-    } catch(_){ setState('done','ready'); res(); }
+    } catch(_){ (duckWakeSong(false), setState('done','ready')); res(); }
   });
 }
 
@@ -1416,142 +1415,11 @@ document.addEventListener('keydown', e => {
     return;
   }
   if (e.key === 'Escape'){
-    if (!$('#lightbox').hidden){ $('#lightbox').hidden = true; return; }
     if (running) return cancelRun();
     if (convo) return stopConvo();
     if (DRAWERS.some(drawerOpen)) closeAllDrawers();
   }
 });
-
-/* ══════════════ 9. the Mac panel ══════════════ */
-
-async function pollMac(){
-  if (!RT.mac) return;
-  try {
-    const s = await api('/api/mac', {headers:headers()}).then(r => r.json());
-    const up = !!s.reachable;
-    $('#macDot').className = 'dot ' + (up ? 'ok' : 'bad');
-    $('#macName').textContent = s.name || s.host || '—';
-    $('#macDetail').textContent = up ? (s.gui_blocked ? 'GUI permissions needed' : (s.macos ? 'macOS ' + s.macos : 'online'))
-                                     : (s.detail || 'unreachable');
-    $('#macFront').textContent = s.front || (s.gui_blocked ? 'blocked' : '—');
-    $('#macBatt').textContent  = [s.battery, s.power].filter(Boolean).join(' ') || '—';
-    $('#macVol').textContent   = s.volume != null ? s.volume : '—';
-    $('#macUp').textContent    = s.uptime || '—';
-    $$('#macActs button').forEach(b => { b.disabled = !up; });
-    $('#pillMac').className = 'pill ' + (up ? 'ok' : 'bad');
-    $('#pillMac').querySelector('b').textContent = up ? (s.name || 'online') : 'offline';
-  } catch(_){ /* server restarting; the next poll will tell us */ }
-}
-
-async function grabScreenshot(){
-  if (!RT.mac) return;
-  const wrap = $('#shotWrap');
-  wrap.classList.add('loading');
-  try {
-    const r = await api('/api/mac/screenshot', {
-      method:'POST', headers:headers({'content-type':'application/json'}), body:'{}',
-    });
-    const j = await r.json();
-    if (j.image){
-      $('#shot').src = 'data:image/jpeg;base64,' + j.image;
-      $('#shot').classList.add('on');
-      $('#shotEmpty').hidden = true;
-      log('mac','SCREEN','captured');
-    } else {
-      $('#shotEmpty').textContent = 'capture blocked';
-      log('error','ERROR', j.error || 'screenshot failed');
-    }
-  } catch(e){
-    log('error','ERROR','screenshot request failed');
-  }
-  wrap.classList.remove('loading');
-}
-
-$('#macRefresh').onclick = grabScreenshot;
-$('#shotWrap').onclick = e => {
-  if (e.target === $('#macRefresh')) return;
-  if (!$('#shot').classList.contains('on')) return grabScreenshot();
-  $('#lightboxImg').src = $('#shot').src;
-  $('#lightbox').hidden = false;
-};
-$('#lightbox').onclick = () => { $('#lightbox').hidden = true; };
-
-$('#macActs').addEventListener('click', async e => {
-  const b = e.target.closest('button[data-mac]');
-  if (!b) return;
-  b.disabled = true;
-  try {
-    const r = await api('/api/mac/action', {
-      method:'POST', headers:headers({'content-type':'application/json'}),
-      body: JSON.stringify({name: b.dataset.mac}),
-    }).then(r => r.json());
-    log(r.ok ? 'mac' : 'error', r.ok ? 'MAC' : 'ERROR',
-        r.ok ? `${r.label}${r.output ? ' → ' + r.output.slice(0,80) : ''}` : (r.error || 'action failed'));
-  } catch(_){ log('error','ERROR','Mac action failed'); }
-  b.disabled = false;
-  pollMac();
-});
-
-/* ══════════════ 9b. Mac action approvals ══════════════
-   tools/mac-guard.sh (used by Hermes' mac-sh / mac-osa) blocks a running Mac
-   tool call the moment it classifies something as risky, and files a request
-   here. This polls for those requests and lets a human resolve them one at a
-   time — the shell script on the other end is genuinely waiting on this. */
-
-const knownApprovals = new Set();
-
-function renderApprovals(list){
-  const box = $('#approvals');
-  const ids = new Set(list.map(a => a.id));
-  // drop cards for anything no longer pending (approved/denied/timed out elsewhere)
-  $$('#approvals .approval').forEach(el => { if (!ids.has(el.dataset.id)) el.remove(); });
-
-  for (const a of list){
-    if (knownApprovals.has(a.id) && $(`.approval[data-id="${a.id}"]`)) continue;
-    knownApprovals.add(a.id);
-    log('mac','APPROVAL NEEDED', `${a.tool}: ${a.desc}`);
-    const el = document.createElement('div');
-    el.className = 'approval';
-    el.dataset.id = a.id;
-    el.innerHTML = `
-      <div class="approval-head"><b>⚠ confirm required</b><span class="tool">${esc(a.tool)}</span></div>
-      <div class="approval-desc">${esc(a.desc)}</div>
-      <div class="approval-cmd">${esc(a.cmd)}</div>
-      <div class="approval-row">
-        <button class="deny">Deny</button>
-        <button class="allow">Approve</button>
-      </div>`;
-    box.appendChild(el);
-  }
-}
-
-async function decideApproval(id, approve){
-  const el = $(`.approval[data-id="${id}"]`);
-  el?.remove();
-  knownApprovals.delete(id);
-  try {
-    await api('/api/mac/approvals/decide', {
-      method:'POST', headers:headers({'content-type':'application/json'}),
-      body: JSON.stringify({id, approve}),
-    });
-    log('mac', approve ? 'APPROVED' : 'DENIED', id);
-  } catch(_){ log('error','ERROR','could not send the decision'); }
-}
-
-$('#approvals').addEventListener('click', e => {
-  const card = e.target.closest('.approval'); if (!card) return;
-  if (e.target.classList.contains('allow')) decideApproval(card.dataset.id, true);
-  if (e.target.classList.contains('deny'))  decideApproval(card.dataset.id, false);
-});
-
-async function pollApprovals(){
-  if (!RT.mac) return;
-  try {
-    const j = await api('/api/mac/approvals', {headers:headers()}).then(r => r.json());
-    renderApprovals(j.pending || []);
-  } catch(_){}
-}
 
 /* ══════════════ 10. telemetry ══════════════ */
 
@@ -1565,7 +1433,6 @@ async function loadStatus(){
   const s = await api('/api/status').then(r => r.json());
   RT.tts = s.tts === 'fish';
   RT.stt = s.stt === 'fish';
-  RT.mac = !!s.mac_enabled;
   RT.browserStt = !!SpeechRecognition;
   RT.browserTts = !!speechSynth;
   if (s.wake_song) WAKE_SONG = s.wake_song;
@@ -1575,7 +1442,6 @@ async function loadStatus(){
   pill('#pillBrain',  hermes ? 'ok' : 'bad', hermes ? 'Hermes' : 'offline');
   pill('#pillVoice',  RT.tts ? 'ok' : 'warn', RT.tts ? 'fish.audio' : 'browser');
   pill('#pillProfile','', s.profile || 'default');
-  pill('#pillMac',    RT.mac ? 'warn' : '', RT.mac ? 'probing' : 'off');
 
   $('#tGateway').textContent = 'localhost:' + (location.port || '8730');
   $('#tGateway').className = 'ok';
@@ -1629,7 +1495,24 @@ setInterval(async () => {
    not free. The browser's own recognizer is free and already running
    locally; it only runs while dormant, not all the time in between. */
 
-const WAKE_PHRASE = /\bwake\s*up\b[\s\S]{0,24}\bdad(?:dy)?'?s?\b[\s\S]{0,24}\bhome\b/i;
+/* Several ways in, because one exact phrase is a single point of failure —
+   the recognizer mishears, there's background noise, you have a cold. Any of
+   these wakes it, so the odds of a hit on the first try are much better:
+     "wake up daddy's home"   the full phrase, in any of its manglings
+     "wake up" / "wake"       on its own
+     "daddy's home"           on its own
+     "Maks" / "SuperMaks"     the name, however the recognizer spells it
+   Kept deliberately tight around real words: a looser pattern fires on
+   ordinary conversation, which is worse than missing a wake. */
+const WAKE_PATTERNS = [
+  /\bwake\s*up\b/i,
+  /\bdad(?:dy)?'?s?\s+(?:is\s+)?home\b/i,
+  /\bsuper\s*ma[kx]s?\b/i,
+  /\bma[kx]s\b/i,
+  /\bhey\s+ma[kx]s?\b/i,
+  /\bjarvis\b/i,
+];
+const WAKE_PHRASE = { test: s => WAKE_PATTERNS.some(re => re.test(s)) };
 // How long without a prompt before the HUD drops back into dormant. Overridable
 // server-side via WAKE_IDLE_HOURS in .env; this is just the pre-status default.
 let WAKE_IDLE_MS = 4.5 * 60 * 60 * 1000;
@@ -1692,11 +1575,16 @@ function handleWake(){
   waking = true;                   // holds off the idle re-arm mid-sequence
   exitDormant();
   log('voice','WAKE','wake phrase heard');
-  setTimeout(async () => {
-    await playWakeSong();          // resolves quickly on its own if blocked, off, or skipped
+  // The song and the greeting run TOGETHER. Awaiting the song meant standing
+  // in silence through a minute of music before SuperMaks said a word — the
+  // reactor sat in `thinking` the whole time. Now the music starts, the
+  // briefing is dispatched immediately underneath it, and the track ducks
+  // out of the way the moment there's speech to hear.
+  setTimeout(() => {
+    playWakeSong();                // deliberately not awaited
     waking = false;
-    transmit('/briefing');         // this also stamps lastActivity, restarting the idle clock
-  }, 650);                         // let the exit animation clear first
+    transmit('/briefing');         // also stamps lastActivity, restarting the idle clock
+  }, 400);
 }
 
 /* ── the wake jingle ──
@@ -1710,8 +1598,18 @@ function handleWake(){
    often blocked by the browser, so this never blocks the greeting: it gives
    itself a few seconds to actually start, then moves on regardless. */
 
-let WAKE_SONG = {source:'off', youtube_id:'', local_ready:false, seconds:105};
+let WAKE_SONG = {source:'off', youtube_id:'', url:'', local_ready:false, seconds:105,
+                 volume:0.35, duck:0.10};
 let wakeSongPlayer = null, wakeSongAudio = null, wakeSongTimer = null;
+
+/* Ducking: the track sits at `volume` on its own and drops to `duck` while
+   SuperMaks is actually speaking, so the greeting is never fighting the music.
+   Called from speak() and again when it finishes. */
+function duckWakeSong(down){
+  const v = Math.round((down ? WAKE_SONG.duck : WAKE_SONG.volume) * 100);
+  try { wakeSongPlayer?.setVolume?.(v); } catch(_){}
+  if (wakeSongAudio) wakeSongAudio.volume = v / 100;
+}
 
 function showSongBanner(on, label){
   $('#songBanner').hidden = !on;
@@ -1740,6 +1638,15 @@ function loadYouTubeAPI(){
 
 function playWakeSong(){
   return new Promise(resolve => {
+    // "open" hands the track to YouTube in its own tab instead of playing it
+    // in the page. Note it takes focus away from the HUD, so the wake greeting
+    // keeps playing here while the video plays over there.
+    if (!DEMO && WAKE_SONG.source === 'open' && WAKE_SONG.url){
+      window.open(WAKE_SONG.url, '_blank', 'noopener');
+      log('voice','WAKE SONG','opened in a new tab');
+      return resolve();
+    }
+
     const usable = !DEMO && (
       (WAKE_SONG.source === 'youtube' && WAKE_SONG.youtube_id) ||
       (WAKE_SONG.source === 'local'   && WAKE_SONG.local_ready)
@@ -1764,7 +1671,12 @@ function playWakeSong(){
             videoId: WAKE_SONG.youtube_id,
             playerVars: {autoplay:1, start:0, controls:0, modestbranding:1, rel:0, playsinline:1},
             events: {
-              onReady: e => { clearTimeout(graceTimer); e.target.playVideo(); wakeSongTimer = setTimeout(finish, cap); },
+              onReady: e => {
+                clearTimeout(graceTimer);
+                e.target.setVolume(Math.round(WAKE_SONG.volume * 100));
+                e.target.playVideo();
+                wakeSongTimer = setTimeout(finish, cap);
+              },
               onStateChange: e => { if (window.YT && e.data === YT.PlayerState.ENDED) finish(); },
               onError: finish,
             },
@@ -1781,6 +1693,7 @@ function playWakeSong(){
         clearTimeout(graceTimer);
         const url = URL.createObjectURL(blob);
         wakeSongAudio = new Audio(url);
+        wakeSongAudio.volume = WAKE_SONG.volume;
         wakeSongAudio.onended = finish;
         wakeSongAudio.onerror = finish;
         wakeSongTimer = setTimeout(finish, cap);
@@ -2061,11 +1974,6 @@ function bootSequence(){
   lastActivity = Date.now();       // boot itself starts the idle clock fresh
   enterDormant();                  // dormant on every launch — see enterDormant() for the fallback
 
-  if (RT.mac){
-    pollMac(); grabScreenshot();
-    setInterval(pollMac, 6000);
-    pollApprovals(); setInterval(pollApprovals, 2500);
-  }
   if (DEMO) log('note','DEMO','running against a mock backend — no Hermes, Mac, or key required');
   if (status && status.runtime !== 'hermes' && !DEMO)
     log('error','ERROR','Hermes CLI not reachable — set HERMES_CMD in .env');
@@ -2084,48 +1992,14 @@ function mockFetch(url, opts = {}){
     runtime:'hermes', permission:'normal', profile:'default', workdir:'/home/maks',
     model:'Hermes default', tools:['terminal','browser','files','google_workspace','memory','mcp:notion','mac-bridge'],
     stt:'fish', tts:'fish', voice_model:'s2.1-pro-free', voice_id:'612b878b113047d9a770c069c8b4fdfe',
-    mac_enabled:true, mac_host:'mac', session:null,
+    session:null,
     wake_song:{source:'youtube', youtube_id:'xMaE6toi4mk', local_ready:false, seconds:105},
     wake_idle_hours:4.5,
   });
 
-  if (url === '/api/mac') return json({
-    reachable:true, host:'mac', name:'Maks-MacBook-Pro', macos:'15.3',
-    front:'Safari', battery:'86%', power:'AC Power', volume:42, uptime:'3 days, 4:12',
-    load:'1.42', disk:'214Gi',
-  });
 
-  if (url === '/api/mac/screenshot'){
-    // a small generated placeholder rather than a fake desktop
-    const c = document.createElement('canvas');
-    c.width = 640; c.height = 400;
-    const g = c.getContext('2d');
-    const grad = g.createLinearGradient(0,0,640,400);
-    grad.addColorStop(0,'#0b1622'); grad.addColorStop(1,'#132b3a');
-    g.fillStyle = grad; g.fillRect(0,0,640,400);
-    g.fillStyle = 'rgba(55,230,208,.5)';
-    g.font = '16px monospace'; g.textAlign = 'center';
-    g.fillText('demo mode — no Mac connected', 320, 200);
-    return json({image: c.toDataURL('image/jpeg', .8).split(',')[1]});
-  }
 
-  if (url === '/api/mac/action') return json({ok:true, label:'Demo action', output:'ok'});
 
-  // A single fake pending approval so the confirmation gate is visible in
-  // demo mode too — it disappears for good once you Approve or Deny it.
-  if (url === '/api/mac/approvals'){
-    if (mockFetch._approvalGone) return json({pending: []});
-    return json({pending: [{
-      id:'demo1', tool:'mac-sh',
-      desc:'run a shell command on the Mac',
-      cmd:'rm ~/Desktop/old-build.zip',
-      ts: Math.floor(Date.now()/1000),
-    }]});
-  }
-  if (url === '/api/mac/approvals/decide'){
-    mockFetch._approvalGone = true;
-    return json({ok:true});
-  }
   if (url === '/api/jobs')       return json({done:[], running:[]});
   if (url === '/api/cancel' || url === '/api/new') return json({ok:true});
   if (url === '/api/speak')      return Promise.resolve({ok:false, status:503});

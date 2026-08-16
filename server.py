@@ -58,6 +58,12 @@ WAKE_SONG_SOURCE = env("WAKE_SONG_SOURCE", "youtube").strip().lower()
 WAKE_SONG_YOUTUBE_ID = env("WAKE_SONG_YOUTUBE_ID", "xMaE6toi4mk").strip()
 WAKE_SONG_LOCAL_PATH = env("WAKE_SONG_LOCAL_PATH", "").strip()
 WAKE_SONG_SECONDS = int(env("WAKE_SONG_SECONDS", "105"))
+# Plays UNDER the greeting, not before it, so these are background levels:
+# VOLUME on its own, DUCK while SuperMaks is actually speaking.
+WAKE_SONG_VOLUME = float(env("WAKE_SONG_VOLUME", "0.35"))
+WAKE_SONG_DUCK = float(env("WAKE_SONG_DUCK", "0.10"))
+# Used when WAKE_SONG_SOURCE=open — the track opens in its own YouTube tab.
+WAKE_SONG_URL = env("WAKE_SONG_URL", "https://www.youtube.com/watch?v=xMaE6toi4mk").strip()
 
 # The HUD goes dormant (wake-phrase-only) on every launch, and re-arms itself
 # after this many hours with no prompt — so a laptop left running all day
@@ -157,6 +163,9 @@ class Handler(BaseHTTPRequestHandler):
                     youtube_id=WAKE_SONG_YOUTUBE_ID if WAKE_SONG_SOURCE == "youtube" else "",
                     local_ready=bool(WAKE_SONG_LOCAL_PATH) and pathlib.Path(WAKE_SONG_LOCAL_PATH).is_file(),
                     seconds=WAKE_SONG_SECONDS,
+                    url=WAKE_SONG_URL if WAKE_SONG_SOURCE == "open" else "",
+                    volume=WAKE_SONG_VOLUME,
+                    duck=WAKE_SONG_DUCK,
                 ),
                 wake_idle_hours=WAKE_IDLE_HOURS,
                 session=SESSION["id"]))

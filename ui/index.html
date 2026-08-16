@@ -42,7 +42,6 @@
   <div class="bar-pills">
     <div class="pill" id="pillBrain"><i></i><b>—</b></div>
     <div class="pill" id="pillVoice"><i></i><b>—</b></div>
-    <div class="pill" id="pillMac"><i></i><b>—</b></div>
     <div class="pill" id="pillProfile"><i></i><b>—</b></div>
   </div>
   <div class="bar-right">
@@ -76,8 +75,6 @@
     <div class="cmds" id="cmds">
       <button class="cmd" data-cmd="/new"><b>/new</b><span>Fresh thread</span></button>
       <button class="cmd" data-cmd="/briefing"><b>/briefing</b><span>Wake report</span></button>
-      <button class="cmd" data-cmd="/mac"><b>/mac</b><span>Drive the Mac</span></button>
-      <button class="cmd" data-cmd="/screen"><b>/screen</b><span>Capture screen</span></button>
       <button class="cmd" data-cmd="/browser"><b>/browser</b><span>Chrome operation</span></button>
       <button class="cmd" data-cmd="/goal"><b>/goal</b><span>Standing objective</span></button>
       <button class="cmd" data-cmd="/background"><b>/background</b><span>Async mission</span></button>
@@ -116,33 +113,6 @@
       <div class="trow"><span>Workdir</span><b id="tWork">—</b></div>
     </div>
 
-    <section class="block">
-      <div class="blabel">Mac bridge <button class="mini" id="macRefresh" title="Refresh screenshot">↻</button></div>
-      <div class="macline">
-        <span class="dot" id="macDot"></span>
-        <b id="macName">—</b>
-        <span class="macdetail" id="macDetail">checking…</span>
-      </div>
-      <button class="shot" id="shotWrap" title="Click to enlarge">
-        <img id="shot" alt="">
-        <div class="shot-empty" id="shotEmpty">no capture yet</div>
-        <div class="shot-scan"></div>
-      </button>
-      <div class="macstats">
-        <div><span>front</span><b id="macFront">—</b></div>
-        <div><span>battery</span><b id="macBatt">—</b></div>
-        <div><span>volume</span><b id="macVol">—</b></div>
-        <div><span>up</span><b id="macUp">—</b></div>
-      </div>
-      <div class="macacts" id="macActs">
-        <button data-mac="lock">Lock</button>
-        <button data-mac="playpause">Play/Pause</button>
-        <button data-mac="volume_down">Vol −</button>
-        <button data-mac="volume_up">Vol +</button>
-        <button data-mac="mute">Mute</button>
-        <button data-mac="sleep">Display off</button>
-      </div>
-    </section>
 
     <section class="block grow">
       <div class="blabel">Event stream
@@ -150,7 +120,6 @@
           <button class="on" data-f="all">all</button>
           <button data-f="agent">agent</button>
           <button data-f="voice">voice</button>
-          <button data-f="mac">mac</button>
           <button data-f="error">faults</button>
         </div>
       </div>
@@ -183,8 +152,6 @@
   </div>
 </section>
 
-<!-- ══ Mac action approvals ══ -->
-<div id="approvals"></div>
 
 <!-- ══ wake-phrase jingle ══ -->
 <div id="wakeSongHost" hidden></div>
@@ -203,8 +170,6 @@
   </div>
 </div>
 
-<!-- ══ screenshot lightbox ══ -->
-<div id="lightbox" hidden><img id="lightboxImg" alt="Mac screen"></div>
 
 <script src="app.js"></script>
 </body>
