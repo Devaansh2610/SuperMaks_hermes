@@ -8,3 +8,6 @@ __pycache__/
 /tmp/
 id_*
 *.pem
+
+# local test harness, never part of the project
+.pwtest/
