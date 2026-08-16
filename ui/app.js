@@ -1714,13 +1714,24 @@ function openWakeLinks(){
   urls.push(...WAKE_TABS);
   if (!urls.length) return;
 
-  // Deliberately NOT the 'noopener' feature string: per spec that always
-  // returns null, so there'd be no way to tell "opened fine" from "blocked"
-  // and the fallback banner would fire every single time. Opening plainly and
-  // then nulling `opener` severs the reference just the same, while still
-  // giving us a handle to test.
+  // Open each in a separate window with specific dimensions
+  const windowConfigs = {
+    'youtube': { width: 800, height: 600 },
+    'nvidia': { width: 1200, height: 800 },
+    'langchain': { width: 1200, height: 800 }
+  };
+
+  const getConfig = (url) => {
+    if (url.includes('youtube.com')) return windowConfigs.youtube;
+    if (url.includes('build.nvidia.com') || url.includes('nvidia.com')) return windowConfigs.nvidia;
+    if (url.includes('langchain.com')) return windowConfigs.langchain;
+    return { width: 1000, height: 700 };
+  };
+
   const blocked = urls.filter(u => {
-    const w = window.open(u, '_blank');
+    const config = getConfig(u);
+    const features = `width=${config.width},height=${config.height},noopener`;
+    const w = window.open(u, '_blank', features);
     if (w) { try { w.opener = null; } catch(_){} return false; }
     return true;
   });
@@ -1736,7 +1747,12 @@ function openWakeLinks(){
   $('#tabsLabel').textContent = `${blocked.length} link${blocked.length > 1 ? 's' : ''} blocked`;
   banner.hidden = false;
   $('#tabsOpen').onclick = () => {           // a real click carries a gesture
-    blocked.forEach(u => { const w = window.open(u, '_blank'); if (w) { try { w.opener = null; } catch(_){} } });
+    blocked.forEach(u => {
+      const config = getConfig(u);
+      const features = `width=${config.width},height=${config.height},noopener`;
+      const w = window.open(u, '_blank', features);
+      if (w) { try { w.opener = null; } catch(_){} }
+    });
     banner.hidden = true;
   };
   $('#tabsDismiss').onclick = () => { banner.hidden = true; };
