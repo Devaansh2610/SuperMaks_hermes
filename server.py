@@ -38,6 +38,7 @@ def env(name, default=""):
     return os.environ.get(f"SUPERMAKS_{name}", os.environ.get(f"JARVIS_{name}", default))
 
 
+import agents           # noqa: E402
 import commands         # noqa: E402
 import runtime          # noqa: E402
 import voice            # noqa: E402
@@ -167,6 +168,11 @@ class Handler(BaseHTTPRequestHandler):
                 ),
                 wake_idle_hours=WAKE_IDLE_HOURS,
                 session=SESSION["id"]))
+
+        if p == "/api/agents":
+            if not self._token_ok():
+                return self._json({"error": "unauthorized"}, 401)
+            return self._json(agents.snapshot())
 
         if p == "/api/jobs":
             if not self._token_ok():

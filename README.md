@@ -113,6 +113,28 @@ plasma, and arc discharge. The coils, spectrum ring and core are driven by real
 audio — your microphone while listening, the speech playback while talking — so
 it is an instrument rather than a screensaver.
 
+## Subagents
+
+Whatever subagents you define inside Hermes show up in the **Telemetry** drawer
+on their own — the server re-scans every few seconds, so adding one appears
+without restarting anything or touching this project. Each shows **ready**,
+**down** (with the reason the listing gave), or **working** while its name is
+being mentioned in the reply currently streaming.
+
+There is no single guaranteed command for listing subagents, and it differs by
+Hermes version, so `agents.py` probes several plausible forms and keeps the
+first that answers. If none do, the panel says so plainly rather than showing
+an empty list that looks like you have none. Point it at the right command if
+your build differs:
+
+```bash
+HERMES_AGENTS_CMD="hermes agents list --json"
+```
+
+Note that **ready/down** is what the listing reports, while **working** is a
+heuristic based on the agent's name appearing in the streaming reply — a useful
+hint about what's active, not a guarantee.
+
 ## Command matrix
 
 Buttons run their command immediately. Commands taking a payload stay **armed**,
@@ -144,6 +166,7 @@ ui/            dependency-free HUD — canvas reactor, streaming, voice loop
 server.py      local HTTP API and NDJSON streaming
 runtime.py     Hermes CLI subprocess and session continuity
 commands.py    slash commands and the mission queue
+agents.py      subagent discovery for the Telemetry panel
 voice.py       Fish Audio speech synthesis
 persona.md     the spoken SuperMaks persona
 build-preview.py  bundles ui/ into the single-file preview
@@ -165,6 +188,7 @@ network unplugged.
 | `WAKE_IDLE_HOURS` | `4.5` | hours of quiet before it goes dormant again |
 | `HERMES_PROFILE` | `default` | profile whose tools are inherited |
 | `HERMES_CMD` | — | absolute path if `hermes` is not on `PATH` |
+| `HERMES_AGENTS_CMD` | auto | override the subagent listing command |
 | `SUPERMAKS_MODEL` | — | passed to `hermes --model`; use a fast one, latency matters |
 | `SUPERMAKS_PORT` | `8730` | dashboard port |
 | `SUPERMAKS_PERMISSION` | `normal` | `bypass` lets Hermes run tools unprompted |

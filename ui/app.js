@@ -982,6 +982,7 @@ function handleEvent(ev){
       answer += ev.text;
       renderAnswer();
       if (!gotFirstDelta){ gotFirstDelta = true; setSub('receiving'); }
+      if (AGENTS.length) renderAgents({supported:true, agents:AGENTS});
       break;
 
     case 'complete':
@@ -1420,6 +1421,55 @@ document.addEventListener('keydown', e => {
     if (DRAWERS.some(drawerOpen)) closeAllDrawers();
   }
 });
+
+/* ══════════════ 9c. subagents ══════════════
+   Whatever subagents you define inside Hermes appear here on their own — the
+   server re-scans on a timer, so adding one shows up without touching this
+   project or restarting anything.
+
+   Status honesty: `ok` / `error` come from what the listing actually reports.
+   `busy` is a heuristic — the agent's name appearing in the reply currently
+   streaming — so it's a decent hint about what's working right now, not a
+   guarantee. Nothing here invents an agent that wasn't listed. */
+
+let AGENTS = [];
+
+function renderAgents(data){
+  const box = $('#agentList'), count = $('#agentCount');
+  AGENTS = data.agents || [];
+
+  if (!data.supported){
+    count.textContent = 'unavailable';
+    box.innerHTML = `<span class="chip ghost">${esc(data.detail || 'not supported by this Hermes')}</span>`;
+    return;
+  }
+  if (!AGENTS.length){
+    count.textContent = 'none';
+    box.innerHTML = `<span class="chip ghost">${esc(data.detail || 'no subagents defined yet')}</span>`;
+    return;
+  }
+
+  const broken = AGENTS.filter(a => a.status === 'error').length;
+  count.textContent = broken ? `${AGENTS.length} · ${broken} down` : `${AGENTS.length} ready`;
+  box.innerHTML = AGENTS.map(a => {
+    const busy = running && a.name && answer.toLowerCase().includes(a.name.toLowerCase());
+    const cls = busy ? 'busy' : (a.status === 'error' ? 'error' : 'ok');
+    const tag = busy ? 'working' : (a.status === 'error' ? 'down' : 'ready');
+    return `<div class="agent ${cls}" title="${esc(a.detail || '')}">`
+         + `<span class="dot"></span><b>${esc(a.name)}</b>`
+         + (a.detail ? `<span class="why">${esc(a.detail)}</span>` : '')
+         + `<span>${tag}</span></div>`;
+  }).join('');
+}
+
+async function pollAgents(){
+  try {
+    const j = await api('/api/agents', {headers:headers()}).then(r => r.json());
+    renderAgents(j);
+  } catch(_){ /* server restarting; the next poll will tell us */ }
+}
+
+$('#agentRefresh').onclick = () => { $('#agentCount').textContent = 'scanning…'; pollAgents(); };
 
 /* ══════════════ 10. telemetry ══════════════ */
 
@@ -1931,6 +1981,9 @@ function bootSequence(){
   lastActivity = Date.now();       // boot itself starts the idle clock fresh
   enterDormant();                  // dormant on every launch — see enterDormant() for the fallback
 
+  pollAgents();
+  setInterval(pollAgents, 10000);   // a newly added subagent shows up on its own
+
   if (DEMO) log('note','DEMO','running against a mock backend — no Hermes, Mac, or key required');
   if (status && status.runtime !== 'hermes' && !DEMO)
     log('error','ERROR','Hermes CLI not reachable — set HERMES_CMD in .env');
@@ -1957,6 +2010,11 @@ function mockFetch(url, opts = {}){
 
 
 
+  if (url === '/api/agents') return json({supported:true, command:'hermes agents list', agents:[
+    {name:'researcher', status:'ok',    detail:'web + docs lookup'},
+    {name:'coder',      status:'ok',    detail:'writes and runs patches'},
+    {name:'inbox',      status:'error', detail:'gmail token expired'},
+  ]});
   if (url === '/api/jobs')       return json({done:[], running:[]});
   if (url === '/api/cancel' || url === '/api/new') return json({ok:true});
   if (url === '/api/speak')      return Promise.resolve({ok:false, status:503});
