@@ -14,7 +14,6 @@ import mimetypes
 import os
 import pathlib
 import secrets
-import subprocess
 import sys
 import threading
 import webbrowser
@@ -40,6 +39,7 @@ def env(name, default=""):
 
 
 import commands         # noqa: E402
+import mac_bridge       # noqa: E402
 import runtime          # noqa: E402
 import voice            # noqa: E402
 
@@ -86,14 +86,9 @@ def _applescript_string(u):
 
 
 def _run_osascript(script):
-    """Runs an AppleScript; returns (ok, stdout) on success or (False, error)."""
-    try:
-        p = subprocess.run(["osascript", "-e", script], check=True, text=True,
-                            stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        return True, p.stdout.strip()
-    except (OSError, subprocess.CalledProcessError) as e:
-        detail = e.stderr.strip()[:200] if getattr(e, "stderr", None) else str(e)[:200]
-        return False, detail
+    """Runs an AppleScript on the Mac — local or remote, see mac_bridge.
+    Returns (ok, stdout) on success or (False, error)."""
+    return mac_bridge.run(["osascript", "-e", script])
 
 
 def _screen_size():
@@ -121,9 +116,12 @@ def open_wake_links(urls):
     AppleScript (Safari) or `open -na` (anything else) sidesteps that
     entirely — each is a genuine OS-level request, not a script call the
     browser can lump in with the others.
+
+    Runs on whatever Mac mac_bridge resolves to — this machine, or a remote
+    one over SSH if SuperMaks itself isn't running on the Mac (dual-Hermes).
     """
-    if sys.platform != "darwin":
-        return False, "not macOS"
+    if not mac_bridge.available():
+        return False, "no Mac reachable"
     screen_w, screen_h = _screen_size()
     win_w = round(screen_w * WAKE_WINDOW_SCALE)
     win_h = round(screen_h * WAKE_WINDOW_SCALE)
@@ -135,12 +133,17 @@ def open_wake_links(urls):
         return x, y, x + win_w, y + win_h
 
     if WAKE_BROWSER_APP.strip().lower() == "safari":
+        # `set bounds of <the document var>` reliably fails right after
+        # `make new document` (-10006, "Can't set bounds of document
+        # 'Untitled'") — Safari hasn't attached the new document to a window
+        # yet at that point. `front window` right after creation is the new
+        # window every time and accepts bounds immediately; verified live.
         lines = []
         for i, u in enumerate(urls):
             x0, y0, x1, y1 = bounds(i)
             lines.append(
-                f'set d{i} to make new document with properties {{URL:"{_applescript_string(u)}"}}\n'
-                f'    set bounds of d{i} to {{{x0}, {y0}, {x1}, {y1}}}')
+                f'make new document with properties {{URL:"{_applescript_string(u)}"}}\n'
+                f'    set bounds of front window to {{{x0}, {y0}, {x1}, {y1}}}')
         opens = "\n    ".join(lines)
         return _run_osascript(f'''
 tell application "Safari"
@@ -148,16 +151,14 @@ tell application "Safari"
     {opens}
 end tell
 ''')
-    try:
-        for i, u in enumerate(urls):
-            x0, y0, _, _ = bounds(i)
-            subprocess.Popen(
-                ["open", "-na", WAKE_BROWSER_APP, "--args", "--new-window",
-                 f"--window-size={win_w},{win_h}", f"--window-position={x0},{y0}", u],
-                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        return True, None
-    except OSError as e:
-        return False, str(e)[:200]
+    for i, u in enumerate(urls):
+        x0, y0, _, _ = bounds(i)
+        ok, reason = mac_bridge.run(
+            ["open", "-na", WAKE_BROWSER_APP, "--args", "--new-window",
+             f"--window-size={win_w},{win_h}", f"--window-position={x0},{y0}", u])
+        if not ok:
+            return False, reason
+    return True, None
 
 # The HUD goes dormant (wake-phrase-only) on every launch, and re-arms itself
 # after this many hours with no prompt — so a laptop left running all day

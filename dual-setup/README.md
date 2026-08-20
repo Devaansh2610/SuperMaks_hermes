@@ -40,18 +40,21 @@ MAC_TAILSCALE_IP=100.x.y.z MAC_USER=devaansh ./setup-ubuntu.sh
 
 ## What these don't cover yet
 
-The dashboard code itself still assumes the Python server and the browser
-you're looking at are the same machine — two known gaps, not yet fixed:
+The dashboard code originally assumed the Python server and the browser
+you're looking at are the same machine. One of the two gaps that broke is
+fixed; one remains:
 
-- **Wake-tab windows** (`open_wake_links()` in `server.py`) run local macOS
-  `osascript`/`open` calls. Running the dashboard on Ubuntu, those calls
-  would execute on Ubuntu, which has no Safari. This project actually had a
-  fix for exactly this shape of problem once — a `mac.py` SSH bridge with a
-  small allowlisted set of named remote actions, removed in commit `76ff0c5`
-  when the project consolidated to single-Mac. Reviving something like it
-  (or a targeted piece of it, just for opening URLs) is the next piece.
-- **`_host_ok()`** in `server.py` only accepts a `127.0.0.1`/`localhost` Host
-  header and binds to loopback only — opening the dashboard at the Ubuntu
-  box's Tailscale IP directly from the Mac browser gets rejected. Until
-  that's addressed, reach it through the SSH tunnel command printed at the
-  end of `setup-ubuntu.sh`.
+- ✅ **Wake-tab windows** (`open_wake_links()` in `server.py`) used to run
+  local macOS `osascript`/`open` calls unconditionally — broken the moment
+  the dashboard runs on Ubuntu. Fixed via `mac_bridge.py`: every Mac-only
+  action now runs locally if this box IS the Mac, or over SSH to
+  `SUPERMAKS_MAC_SSH_HOST` (falling back to the same `TERMINAL_SSH_HOST` this
+  setup script already wrote to `~/.hermes/.env`) if it isn't. This revives
+  the shape of the `mac.py` SSH bridge this project had once before
+  (removed in `76ff0c5` when it consolidated to single-Mac), scoped to just
+  what the wake flow needs.
+- ⏳ **`_host_ok()`** in `server.py` still only accepts a `127.0.0.1`/
+  `localhost` Host header and binds to loopback only — opening the dashboard
+  at the Ubuntu box's Tailscale IP directly from the Mac browser gets
+  rejected. Reach it through the SSH tunnel command `setup-ubuntu.sh` prints
+  at the end until this one's addressed too.

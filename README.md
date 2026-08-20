@@ -197,6 +197,7 @@ network unplugged.
 | `WAKE_BROWSER_APP` | `Safari` | the .app macOS opens the wake links in, one separate new window per link |
 | `WAKE_WINDOW_SCALE` | `0.45` | each wake window's width/height as a fraction of the screen |
 | `WAKE_IDLE_HOURS` | `4.5` | hours of quiet before it goes dormant again |
+| `SUPERMAKS_MAC_SSH_HOST/_USER/_KEY` | — | drive a *different* Mac over SSH for anything screen-related, if SuperMaks itself isn't running on the Mac (dual-Hermes, see `dual-setup/`); falls back to Hermes' own `~/.hermes/.env` SSH settings |
 | `HERMES_PROFILE` | `default` | profile whose tools are inherited |
 | `HERMES_CMD` | — | absolute path if `hermes` is not on `PATH` |
 | `SUPERMAKS_MODEL` | — | passed to `hermes --model`; use a fast one, latency matters |
