@@ -14,6 +14,7 @@ import mimetypes
 import os
 import pathlib
 import secrets
+import subprocess
 import sys
 import threading
 import webbrowser
@@ -50,10 +51,10 @@ MAX_JSON_BODY = 1024 * 1024
 MAX_AUDIO_BODY = 12 * 1024 * 1024
 
 # The wake-phrase jingle. "open" hands the track straight to YouTube in its own
-# tab — no player in the HUD, no external script, nothing stored here. "local"
-# streams a file YOU already own from this machine; "off" disables it. No audio
-# is ever bundled with this repo: that would mean redistributing someone else's
-# copyrighted recording, which this project isn't going to do.
+# window. "local" streams a file YOU already own from this machine; "off"
+# disables it. No audio is ever bundled with this repo: that would mean
+# redistributing someone else's copyrighted recording, which this project isn't
+# going to do.
 WAKE_SONG_SOURCE = env("WAKE_SONG_SOURCE", "open").strip().lower()
 WAKE_SONG_LOCAL_PATH = env("WAKE_SONG_LOCAL_PATH", "").strip()
 WAKE_SONG_SECONDS = int(env("WAKE_SONG_SECONDS", "105"))
@@ -61,7 +62,7 @@ WAKE_SONG_SECONDS = int(env("WAKE_SONG_SECONDS", "105"))
 # VOLUME on its own, DUCK while SuperMaks is actually speaking.
 WAKE_SONG_VOLUME = float(env("WAKE_SONG_VOLUME", "0.35"))
 WAKE_SONG_DUCK = float(env("WAKE_SONG_DUCK", "0.10"))
-# Used when WAKE_SONG_SOURCE=open — the track opens in its own YouTube tab.
+# Used when WAKE_SONG_SOURCE=open — the track opens in its own YouTube window.
 WAKE_SONG_URL = env("WAKE_SONG_URL", "https://www.youtube.com/watch?v=xMaE6toi4mk&list=RDxMaE6toi4mk&start_radio=1&pp=ygUcc2hvdWxkIEkgc3RheSBvciBzaG91bGQgaSBnb6AHAQ%3D%3D").strip()
 
 # Opened alongside the greeting, all at once. Comma-separated; blank to disable.
@@ -69,8 +70,94 @@ WAKE_SONG_URL = env("WAKE_SONG_URL", "https://www.youtube.com/watch?v=xMaE6toi4m
 # wake opens goes through one code path and one popup-blocker fallback.
 WAKE_TABS = [u.strip() for u in env(
     "WAKE_TABS",
-    "https://www.youtube.com/watch?v=xMaE6toi4mk&list=RDxMaE6toi4mk&start_radio=1,https://build.nvidia.com/models,https://www.langchain.com/blog"
+    "https://build.nvidia.com/models,https://www.youtube.com"
 ).split(",") if u.strip()]
+
+# The .app SuperMaks asks macOS to open the wake links in.
+WAKE_BROWSER_APP = env("WAKE_BROWSER_APP", "Safari")
+
+# Each wake window's width/height as a fraction of the screen — full-size
+# windows are overkill for a link you're glancing at, not reading.
+WAKE_WINDOW_SCALE = float(env("WAKE_WINDOW_SCALE", "0.45"))
+
+
+def _applescript_string(u):
+    return u.replace("\\", "\\\\").replace('"', '\\"')
+
+
+def _run_osascript(script):
+    """Runs an AppleScript; returns (ok, stdout) on success or (False, error)."""
+    try:
+        p = subprocess.run(["osascript", "-e", script], check=True, text=True,
+                            stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        return True, p.stdout.strip()
+    except (OSError, subprocess.CalledProcessError) as e:
+        detail = e.stderr.strip()[:200] if getattr(e, "stderr", None) else str(e)[:200]
+        return False, detail
+
+
+def _screen_size():
+    """(width, height) of the main display, via Finder — falls back to a
+    reasonable guess if that ever fails rather than blowing up the wake."""
+    ok, out = _run_osascript('tell application "Finder" to get bounds of window of desktop')
+    if ok and out:
+        try:
+            x0, y0, x1, y1 = (int(n.strip()) for n in out.split(","))
+            return x1 - x0, y1 - y0
+        except ValueError:
+            pass
+    return 1440, 900
+
+
+def open_wake_links(urls):
+    """Ask macOS to open every wake URL as its own separate new browser
+    window, each sized to WAKE_WINDOW_SCALE of the screen and cascaded so
+    they don't land exactly on top of each other.
+
+    `window.open()` from the page itself can't do this reliably: Chrome only
+    honors popup-window features (and only avoids merging consecutive calls
+    into tabs of one window) when each call carries its own fresh user
+    gesture, which a voice-triggered wake never has. Driving the browser via
+    AppleScript (Safari) or `open -na` (anything else) sidesteps that
+    entirely — each is a genuine OS-level request, not a script call the
+    browser can lump in with the others.
+    """
+    if sys.platform != "darwin":
+        return False, "not macOS"
+    screen_w, screen_h = _screen_size()
+    win_w = round(screen_w * WAKE_WINDOW_SCALE)
+    win_h = round(screen_h * WAKE_WINDOW_SCALE)
+    cascade = 36  # px offset per successive window, so a stack is visible
+
+    def bounds(i):
+        x = min(i * cascade, max(0, screen_w - win_w))
+        y = min(i * cascade, max(0, screen_h - win_h))
+        return x, y, x + win_w, y + win_h
+
+    if WAKE_BROWSER_APP.strip().lower() == "safari":
+        lines = []
+        for i, u in enumerate(urls):
+            x0, y0, x1, y1 = bounds(i)
+            lines.append(
+                f'set d{i} to make new document with properties {{URL:"{_applescript_string(u)}"}}\n'
+                f'    set bounds of d{i} to {{{x0}, {y0}, {x1}, {y1}}}')
+        opens = "\n    ".join(lines)
+        return _run_osascript(f'''
+tell application "Safari"
+    activate
+    {opens}
+end tell
+''')
+    try:
+        for i, u in enumerate(urls):
+            x0, y0, _, _ = bounds(i)
+            subprocess.Popen(
+                ["open", "-na", WAKE_BROWSER_APP, "--args", "--new-window",
+                 f"--window-size={win_w},{win_h}", f"--window-position={x0},{y0}", u],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        return True, None
+    except OSError as e:
+        return False, str(e)[:200]
 
 # The HUD goes dormant (wake-phrase-only) on every launch, and re-arms itself
 # after this many hours with no prompt — so a laptop left running all day
@@ -205,6 +292,7 @@ class Handler(BaseHTTPRequestHandler):
             return self._json({"error": "unauthorized"}, 401)
 
         json_paths = {"/api/run", "/api/speak", "/api/new", "/api/cancel",
+                      "/api/wake/open-tabs",
                       "/api/mac/action", "/api/mac/screenshot", "/api/mac/approvals/decide"}
         ctype = self.headers.get("Content-Type", "").split(";", 1)[0].lower()
         if p in json_paths and ctype != "application/json":
@@ -240,6 +328,15 @@ class Handler(BaseHTTPRequestHandler):
             stopped = runtime.cancel_active()
             SESSION["id"] = None
             return self._json({"ok": True, "stopped": stopped})
+
+        if p == "/api/wake/open-tabs":
+            urls = ([WAKE_SONG_URL] if WAKE_SONG_SOURCE == "open" and WAKE_SONG_URL else []) + WAKE_TABS
+            if not urls:
+                return self._json({"ok": True, "opened": 0})
+            ok, reason = open_wake_links(urls)
+            if not ok:
+                return self._json({"ok": False, "error": reason}, 501)
+            return self._json({"ok": True, "opened": len(urls)})
 
         if p == "/api/run":
             if not RUN_LOCK.acquire(blocking=False):

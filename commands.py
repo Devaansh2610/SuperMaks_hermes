@@ -301,16 +301,24 @@ def handle(message, runner=None):
         )
         return dict(message=(
             "This is the wake briefing. The data below was fetched just now from Gmail, "
-            "Google Calendar, and GitHub. Do not call tools again. Do not invent an empty inbox "
-            "if mail is listed. Empty JSON [] means that source really had nothing.\n\n"
+            "Google Calendar, and GitHub — do not call tools again for any of it. Do not invent "
+            "an empty inbox if mail is listed. Empty JSON [] means that source really had nothing.\n\n"
             + data + "\n\n"
+            "None of that data covers weather or news, so for those two lines only, use a web "
+            "search or browser tool once each: check the current weather in New Delhi, India, and "
+            "check whether anything alarming or major is currently happening in or affecting Delhi.\n\n"
             "Then speak in this shape:\n"
             "1. Open with exactly: \"Welcome home, sir.\"\n"
-            "2. One or two sentences with the one or two things that matter most. Real numbers, real names.\n"
-            "3. One dry, personal aside about something specific you noticed.\n"
-            "4. Close with one short offer of something you could do.\n\n"
-            "Keep it to about four spoken sentences. If a source failed, say that source failed — "
-            "do not treat a failure as an empty inbox."
+            "2. One or two sentences with the one or two things that matter most from mail/calendar/"
+            "GitHub. Real numbers, real names.\n"
+            "3. One short sentence on the current New Delhi weather.\n"
+            "4. If — and only if — something alarming or major is genuinely happening in Delhi right "
+            "now, one to two lines summarizing it; otherwise skip this line entirely, don't say "
+            "there's nothing to report.\n"
+            "5. One dry, personal aside about something specific you noticed.\n"
+            "6. Close with one short offer of something you could do.\n\n"
+            "Keep the whole thing tight — about six spoken sentences total. If a source failed, say "
+            "that source failed — do not treat a failure as an empty inbox or as calm weather/news."
         ), note="wake briefing (live fetch)")
 
     if cmd == "github":

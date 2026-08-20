@@ -83,21 +83,24 @@ underneath it rather than waiting for the music to finish.
 No audio file is bundled with this repo, and none ever will be — that would mean
 redistributing someone else's copyrighted recording.
 
-It also opens whatever you list in `WAKE_TABS` at the same moment — GitHub,
-Netflix, a reading list, whatever you want waiting for you.
+It also opens whatever you list in `WAKE_TABS` at the same moment — each its
+own separate window, sized to `WAKE_WINDOW_SCALE` of the screen so they don't
+take it over, whatever you want waiting for you.
 
 ```bash
-WAKE_SONG_SOURCE=open       # open a YouTube tab (default) · local · off
+WAKE_SONG_SOURCE=open       # open a YouTube window (default) · local · off
 WAKE_SONG_URL=https://...   # the track
-WAKE_TABS=https://github.com/,https://www.netflix.com/,https://medium.com/tag/ai-research
+WAKE_TABS=https://build.nvidia.com/models,https://www.youtube.com
+WAKE_BROWSER_APP=Safari     # what WAKE_TABS (and WAKE_SONG_SOURCE=open) opens in
+WAKE_WINDOW_SCALE=0.45      # each wake window as a fraction of the screen
 ```
 
-**Allow pop-ups for `127.0.0.1:8730` in Chrome.** Browsers only permit
-programmatic tabs while a user gesture is active, and a wake triggered by
-*voice* has no gesture — so without that permission Chrome blocks them. Waking
-by tap or Control does carry a gesture and works either way. If anything is
-blocked the HUD shows a one-click banner to open them, so it always degrades to
-something usable rather than failing silently.
+Opening `WAKE_TABS`, and the song window in `open` mode, both go through the
+local server (AppleScript on Safari, `open -na` on anything else), not
+`window.open()` from the page — a voice-triggered wake never carries a user
+gesture, and Chrome only gives a `window.open()` call a real new window when
+it has one. That's also why each link lands as its own separate window rather
+than a tab of the last one.
 
 Set `WAKE_SONG_SOURCE=local` with `WAKE_SONG_LOCAL_PATH` to stream a file you
 already own instead; it plays in-page at `WAKE_SONG_VOLUME` and ducks to
@@ -173,7 +176,9 @@ network unplugged.
 | `WAKE_SONG_SOURCE` | `open` | `open`, `local`, or `off` |
 | `WAKE_SONG_URL` | The Clash | what `open` opens |
 | `WAKE_SONG_VOLUME` / `_DUCK` | `0.35` / `0.10` | local playback level, and level while speaking |
-| `WAKE_TABS` | GitHub, Netflix, Medium | comma-separated links opened on wake; blank for none |
+| `WAKE_TABS` | NVIDIA NIM, YouTube | comma-separated links opened on wake; blank for none |
+| `WAKE_BROWSER_APP` | `Safari` | the .app macOS opens the wake links in, one separate new window per link |
+| `WAKE_WINDOW_SCALE` | `0.45` | each wake window's width/height as a fraction of the screen |
 | `WAKE_IDLE_HOURS` | `4.5` | hours of quiet before it goes dormant again |
 | `HERMES_PROFILE` | `default` | profile whose tools are inherited |
 | `HERMES_CMD` | — | absolute path if `hermes` is not on `PATH` |

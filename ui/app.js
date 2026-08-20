@@ -884,7 +884,16 @@ const reactor = (() => {
     ctx.restore();
   }
 
-  return { start(){ resize(); if (!raf) raf = requestAnimationFrame(draw); } };
+  return {
+    start(){ resize(); if (!raf) raf = requestAnimationFrame(draw); },
+    // The dormant overlay is fully opaque (#dormant{background:#000}), so the
+    // reactor is invisible the entire time the HUD is dormant — which is most
+    // of its uptime. Redrawing 16 actuators + 7 planetary gears + spectrum at
+    // 24fps into a hidden canvas is pure wasted CPU/GPU, so stop entirely
+    // rather than just throttling it.
+    pause(){ if (raf){ cancelAnimationFrame(raf); raf = 0; } },
+    resume(){ lastDraw = 0; if (!raf && !document.hidden) raf = requestAnimationFrame(draw); },
+  };
 })();
 
 /* the small live meter inside the Voice button */
@@ -1606,6 +1615,7 @@ function enterDormant(){
   dormantOn = true;
   $('#dormant').hidden = false;
   $('#dormant').classList.remove('waking');
+  reactor.pause();                 // fully hidden behind #dormant — no point drawing it
   log('voice','WAKE','listening for the wake phrase');
   startWakeListening();
 }
@@ -1613,6 +1623,7 @@ function enterDormant(){
 function exitDormant(){
   dormantOn = false;
   stopWakeListening();
+  reactor.resume();
   $('#dormant').classList.add('waking');
   setTimeout(() => { $('#dormant').hidden = true; }, 650);
 }
@@ -1696,15 +1707,21 @@ function stopWakeSong(){
   showSongBanner(false);
 }
 
-/* Everything the wake opens — the song (in "open" mode) plus WAKE_TABS — goes
-   out in one synchronous batch.
+/* Everything the wake opens — the song (in "open" mode) plus WAKE_TABS.
 
-   Synchronous matters: a browser only allows programmatic tabs while it still
-   considers a user gesture "active". Deferring any of these into a setTimeout
-   throws that away and guarantees a block. Even so, a wake triggered by VOICE
-   has no gesture at all, so Chrome will refuse unless pop-ups are allowed for
-   this origin — hence the fallback banner, which turns the retry into a real
-   click and always works. */
+   Chrome only ever honors popup-window features (and only avoids merging
+   consecutive window.open() calls into tabs of one window) when each call
+   carries its OWN fresh user gesture — something no amount of feature-string
+   or target-name tweaking from inside the page can fake, and a voice-
+   triggered wake never has one gesture at all, let alone one per URL. So the
+   real fix is not to do this from the page: ask the server to have macOS
+   open each URL as its own new window via `open -na <browser> --args
+   --new-window <url>`, which is a genuine per-URL OS request, not a script
+   call, so Chrome always gives it a real window.
+
+   The old direct window.open() batch is kept as a fallback for when that
+   isn't available (non-mac, or the server call fails) — degraded, but still
+   better than nothing. */
 let WAKE_TABS = [];
 
 function openWakeLinks(){
@@ -1714,6 +1731,16 @@ function openWakeLinks(){
   urls.push(...WAKE_TABS);
   if (!urls.length) return;
 
+  api('/api/wake/open-tabs', {method:'POST', headers:headers({'content-type':'application/json'}), body:'{}'})
+    .then(r => r.json())
+    .then(j => {
+      if (j && j.ok){ log('voice','WAKE TABS', `opened ${j.opened} as new windows`); return; }
+      openWakeLinksInBrowser(urls);
+    })
+    .catch(() => openWakeLinksInBrowser(urls));
+}
+
+function openWakeLinksInBrowser(urls){
   // Open each in a separate window with specific dimensions
   const windowConfigs = {
     'youtube': { width: 800, height: 600 },
@@ -1728,10 +1755,20 @@ function openWakeLinks(){
     return { width: 1000, height: 700 };
   };
 
-  const blocked = urls.filter(u => {
+  const blocked = urls.filter((u, i) => {
     const config = getConfig(u);
-    const features = `width=${config.width},height=${config.height},noopener`;
-    const w = window.open(u, '_blank', features);
+    // A unique target name per call, not '_blank', is what stops Chrome from
+    // grouping consecutive window.open() calls as tabs inside the first
+    // popup window it creates — '_blank' alone doesn't prevent that.
+    //
+    // Deliberately NOT the 'noopener' feature string: per spec that always
+    // returns null, so there'd be no way to tell "opened fine" from "blocked"
+    // and the fallback banner would fire every single time. Opening plainly
+    // and then nulling `opener` severs the reference just the same, while
+    // still giving us a handle to test.
+    const name = `supermaks_wake_${Date.now()}_${i}`;
+    const features = `width=${config.width},height=${config.height},menubar=no,toolbar=no,location=no,status=no`;
+    const w = window.open(u, name, features);
     if (w) { try { w.opener = null; } catch(_){} return false; }
     return true;
   });
@@ -1747,10 +1784,11 @@ function openWakeLinks(){
   $('#tabsLabel').textContent = `${blocked.length} link${blocked.length > 1 ? 's' : ''} blocked`;
   banner.hidden = false;
   $('#tabsOpen').onclick = () => {           // a real click carries a gesture
-    blocked.forEach(u => {
+    blocked.forEach((u, i) => {
       const config = getConfig(u);
-      const features = `width=${config.width},height=${config.height},noopener`;
-      const w = window.open(u, '_blank', features);
+      const name = `supermaks_wake_${Date.now()}_${i}`;
+      const features = `width=${config.width},height=${config.height},menubar=no,toolbar=no,location=no,status=no`;
+      const w = window.open(u, name, features);
       if (w) { try { w.opener = null; } catch(_){} }
     });
     banner.hidden = true;
