@@ -70,6 +70,12 @@ Several, because one exact string is a single point of failure — a mishearing 
 a bit of background noise and nothing happens. Two fallbacks if the mic still
 misses: **tap the dormant screen**, or **long-press Control**.
 
+The wake phrase also works once you've hung up (Control) and it's just sitting
+in plain standby, not only right after boot or a long idle — saying it there
+starts listening immediately, the same as pressing the mic button, without
+repeating the briefing or reopening the wake tabs/song (that sequence only
+ever runs on a real wake from the dormant screen).
+
 Waking runs `/briefing`: a live look at whatever your profile is connected to —
 mail, calendar, GitHub commits and open PRs, messages — opened with "Welcome
 home, sir," and closed with one dry, specific remark about something it actually
@@ -126,6 +132,17 @@ coil pack with sliding armature caps, tilting stator vanes, a turbine behind the
 plasma, and arc discharge. The coils, spectrum ring and core are driven by real
 audio — your microphone while listening, the speech playback while talking — so
 it is an instrument rather than a screensaver.
+
+It only spins while actually engaged — listening, speaking, thinking, or
+transcribing. On standby the mechanism holds its pose and just breathes gently;
+no rotation runs behind an idle screen. Engaged, small nodes light up and link
+to each other around the rim as SuperMaks works — a loose "connecting
+thoughts" read, brighter the louder the audio.
+
+**TELEMETRY** now includes an **Activity** panel: a live feed of what Hermes is
+actually doing mid-run (tool calls, as they happen), so a long pause shows up
+as a specific "still waiting on X" rather than an opaque "thinking…" — see the
+`SUPERMAKS_PERMISSION` note under Security for what a stall usually means.
 
 ## Command matrix
 
@@ -201,7 +218,15 @@ Old `JARVIS_*` variables are still read as a fallback.
 
 Hermes runs with your account's reach on this machine. `SUPERMAKS_PERMISSION`
 decides whether it asks before using a tool — `normal` is the default for a
-reason.
+reason. Important nuance: Hermes' own approval prompt is a full-screen
+terminal UI that needs a real TTY to render and be answered, and this
+dashboard runs Hermes headless (piped, no TTY) — so in `normal` mode there is
+currently no way to actually grant a dangerous-command approval from here. It
+shows up as a stall (flagged in the **Activity** panel, see below) that
+Hermes itself auto-denies and moves on from after its own approval timeout
+(60s by default). `bypass` sets `--yolo`, skipping that prompt (and the stall)
+entirely — decide per your own risk tolerance; there's no dashboard-side
+approve/deny yet.
 
 ## Troubleshooting
 

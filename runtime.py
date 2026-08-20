@@ -24,9 +24,16 @@ import time
 
 _SESSION_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{7,127}$")
 _ANSI = re.compile(r"\x1b(?:\[[0-?]*[ -/]*[@-~]|\][^\x07]*(?:\x07|\x1b\\))")
+# Without -Q, Hermes wraps the answer in a bordered box and adds a footer —
+# none of it is the answer itself, so all of it gets stripped here.
 _CLI_NOISE = re.compile(
     r"^(?:Query:|Initializing agent|Resume this session with:|hermes --resume\b|"
-    r"Session:|Duration:|Messages:|─+|=+|[-─ ]*⚕\s*Hermes\b)", re.I)
+    r"hermes -c\b|Session:|Duration:|Messages:|Title:|─+|=+|╭|╰|⚠|"
+    r"[-─ ]*⚕\s*Hermes\b)", re.I)
+# The "┊ 💻 preparing terminal…" / "┊ 💻 $  ls  1.9s" tool-preview lines that
+# -Q would otherwise have hidden. Captured as their own event instead of
+# either leaking into the spoken answer or being silently discarded.
+_TOOL_LINE = re.compile(r"^┊\s*(.*)$")
 
 def env(name, default=""):
     """SUPERMAKS_X, falling back to the old JARVIS_X so an inherited .env still works."""
@@ -109,13 +116,20 @@ def runtime_kind():
 def build_command(message, session_id=None, system=None):
     # Hermes chat has no separate --system flag. Put the voice persona and the
     # current request into one explicit turn so the model answers as SuperMaks
-    # instead of narrating its CLI/runtime. Quiet mode removes the Hermes banner.
+    # instead of narrating its CLI/runtime.
     prompt = message
     if system:
         prompt = (f"{system}\n\n## Current user request\n{message}\n\n"
                   "Answer the request now. Return only the words SuperMaks should say aloud; "
                   "never include session IDs, runtime metadata, headings, or process narration.")
-    cmd = _hermes_base() + ["chat", "-Q", "-q", prompt, "--source", SOURCE]
+    # Deliberately NOT -Q (quiet): quiet mode's own --help says it suppresses
+    # "tool previews" — exactly the "$ ls  1.9s" / "reading file…" lines the
+    # dashboard's Activity panel is built to show. Non-quiet, non-TTY output
+    # is still clean plain text (verified against a real Hermes install) —
+    # just a banner/footer wrapped around the answer, which _CLI_NOISE below
+    # strips, plus the tool-preview lines _TOOL_LINE below captures instead
+    # of letting them leak into the spoken answer.
+    cmd = _hermes_base() + ["chat", "-q", prompt, "--source", SOURCE]
     if valid_session(session_id):
         cmd += ["--resume", str(session_id)]
     if PROFILE and PROFILE != "default":
@@ -124,6 +138,8 @@ def build_command(message, session_id=None, system=None):
         cmd += ["--model", MODEL]
     if TOOLSETS:
         cmd += ["--toolsets", TOOLSETS]
+    if PERMISSION == "bypass":
+        cmd += ["--yolo"]
     # Hermes one-shot output is currently plain text; slash commands that need a
     # live TUI are handled in commands.py before we get here. Prompts go to the
     # real agent with normal tool access.
@@ -226,6 +242,12 @@ def _run_hermes_locked(message, session_id=None, system=None):
     last = time.monotonic()
     text_seen = False
     emitted_session = None
+    # The prompt we send is the full persona + request template, which wraps
+    # across many lines in the "Query: …" echo — every one of those extra
+    # lines must be swallowed too, not just the first, or persona/system text
+    # leaks into the spoken answer. The echo block always ends right where
+    # "Initializing agent…" begins.
+    in_query_echo = False
     try:
         while not done.is_set() or q:
             line = None
@@ -246,11 +268,22 @@ def _run_hermes_locked(message, session_id=None, system=None):
             clean = _ANSI.sub("", line).strip()
             if not clean:
                 continue
+            if in_query_echo:
+                if clean.lower().startswith("initializing agent"):
+                    in_query_echo = False
+                continue
+            if clean.startswith("Query:"):
+                in_query_echo = True
+                continue
             session_match = re.match(r"^session_id:\s*(\S+)\s*$", clean, re.I)
             if session_match:
                 candidate = session_match.group(1)
                 if valid_session(candidate):
                     emitted_session = candidate
+                continue
+            tool_match = _TOOL_LINE.match(clean)
+            if tool_match:
+                yield dict(t="tool", message=tool_match.group(1).strip())
                 continue
             # Be defensive when an older Hermes build ignores quiet mode.
             if _CLI_NOISE.match(clean):

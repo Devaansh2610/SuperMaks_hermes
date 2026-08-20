@@ -309,6 +309,25 @@ body.open-bottom .drawer.bottom{ transform:translateX(-50%); }
 .k-note,.k-send{ border-color:var(--ink-faint); } .k-note .kind,.k-send .kind{ color:var(--ink-dim); }
 .k-tool{ border-color:var(--amber); } .k-tool .kind{ color:var(--amber); }
 
+/* activity — live tool-call feed for the run in progress */
+.astate{
+  margin-left:auto; font:500 8.5px/1 var(--mono); letter-spacing:.08em; text-transform:none;
+  color:var(--ink-faint);
+}
+.astate.busy{ color:var(--amber); }
+.astate.stalled{ color:var(--red); }
+.activity{
+  display:flex; flex-direction:column; gap:4px; max-height:150px; overflow:auto;
+}
+.aitem{
+  display:flex; align-items:baseline; gap:7px; padding:5px 8px; border-radius:7px;
+  border:1px solid var(--line); background:rgba(255,255,255,.015);
+  font:400 10.5px/1.4 var(--mono); color:var(--ink-dim);
+}
+.aitem b{ color:var(--amber); font-weight:600; flex:0 0 auto; }
+.aitem.stalled{ border-color:rgba(255,90,90,.35); color:#ffb8c0; }
+.aitem.stalled b{ color:var(--red); }
+
 /* transcript + transport */
 .rtag{
   font:600 8.5px/1 var(--mono); letter-spacing:.14em; text-transform:uppercase;

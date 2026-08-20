@@ -199,17 +199,35 @@ const reactor = (() => {
   const coil       = new Float32Array(SEG);
   const coilTarget = new Float32Array(SEG);
 
+  // Small floating nodes around the reactor's rim that light up and link to
+  // each other while it's actually listening/speaking/thinking — "trying to
+  // connect ideas." Fixed positions computed once; only their glow moves.
+  // (Inline pseudo-random, not the hash()/noise() helpers below — those are
+  // declared with const further down and this runs at module init time.)
+  const seeded = n => { const s = Math.sin(n * 12.9898) * 43758.5453; return s - Math.floor(s); };
+  const NODES = 22;
+  const nodeSeed = Array.from({length: NODES}, (_, i) => ({
+    a:  (i / NODES) * TAU + (seeded(i * 3.1) - 0.5) * 0.5,
+    rr: 1.0 + seeded(i * 7.7) * 0.3,
+    ph: seeded(i * 5.3) * TAU * 3,
+  }));
+
   const still = document.createElement('canvas');
   const sctx  = still.getContext('2d');
   const sprite = {};                       // rotated-blit sprites
 
   let W = 0, H = 0, dpr = 1, cx = 0, cy = 0, R = 0;
-  let t = 0, level = 0, raf = 0, frame = 0, lastDraw = 0;
+  // t drives every mechanical rotation (gears, actuators, coil sweep, LED
+  // chase) and only advances while live() — so standby holds its pose
+  // instead of spinning forever behind nothing. idleT never stops: it drives
+  // the gentle standby breathing so the default state reads as "calm", not
+  // "frozen/broken".
+  let t = 0, idleT = 0, level = 0, raf = 0, frame = 0, lastDraw = 0;
   let acc = '#37e6d0', acc2 = '#7ef4ff';
   let discharge = [], sparks = [];
   let indexAngle = 0, indexNext = 0;       // stepper collar
   // Cap backing-store size. A 1120px reactor at 2× DPR is ~5M pixels redrawn
-  // 60 times a second with additive blends — that's the GPU/RAM bill.
+  // every frame with additive blends — that's the GPU/RAM bill.
   const PIXEL_CAP = 1.15;
   const IDLE_MS = 1000 / 24;
   const LIVE_MS = 1000 / 40;
@@ -563,7 +581,8 @@ const reactor = (() => {
     const dt = lastDraw ? Math.min(0.05, (now - lastDraw) / 1000) : 0.016;
     lastDraw = now;
     frame++;
-    t += dt * rate;
+    idleT += dt * rate;
+    if (live()) t += dt * rate;
 
     if (frame % 15 === 0){
       const cs = getComputedStyle(ROOT_EL);
@@ -574,7 +593,7 @@ const reactor = (() => {
 
     const analyser = liveAnalyser();
     const target = analyser ? clamp(rmsOf(analyser) * 4.2, 0, 1)
-                            : 0.10 + Math.sin(t * 1.15) * 0.045;
+                            : 0.10 + Math.sin(idleT * 1.15) * 0.045;
     level += (target - level) * 0.16;
 
     ctx.clearRect(0, 0, W, H);
@@ -882,6 +901,44 @@ const reactor = (() => {
     ctx.fillStyle = grad.bloom;
     ctx.beginPath(); ctx.arc(cx, cy, R * 1.1, 0, TAU); ctx.fill();
     ctx.restore();
+
+    drawIdeaNodes();
+  }
+
+  // ── idea nodes: only while it's actually engaged (listening/speaking/
+  // thinking/transcribing). Nodes brighten on their own rhythm and draw a
+  // line to each other node they currently overlap with in brightness — a
+  // loose "connecting thoughts" read, not a literal diagram of anything.
+  function drawIdeaNodes(){
+    if (reduce || !live()) return;
+    const pts = nodeSeed.map(n => {
+      const rad = R * n.rr + Math.sin(t * .6 + n.ph) * R * .018;
+      return {
+        x: cx + Math.cos(n.a) * rad,
+        y: cy + Math.sin(n.a) * rad,
+        glow: .2 + .8 * Math.max(0, Math.sin(t * 1.3 + n.ph * 2)),
+      };
+    });
+    const energy = .45 + level * .55;
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.strokeStyle = acc2;
+    ctx.lineWidth = Math.max(.6, R * .0014);
+    for (let i = 0; i < pts.length; i++){
+      for (let j = i + 1; j < pts.length; j++){
+        const link = pts[i].glow * pts[j].glow;
+        if (link < .32) continue;
+        ctx.globalAlpha = Math.min(.9, (link - .32) * 1.45) * energy;
+        ctx.beginPath(); ctx.moveTo(pts[i].x, pts[i].y); ctx.lineTo(pts[j].x, pts[j].y); ctx.stroke();
+      }
+    }
+    ctx.fillStyle = acc2;
+    for (const p of pts){
+      ctx.globalAlpha = Math.min(1, p.glow * 1.1) * energy;
+      ctx.beginPath(); ctx.arc(p.x, p.y, Math.max(1, R * .0072), 0, TAU); ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+    ctx.restore();
   }
 
   return {
@@ -936,6 +993,37 @@ let running = false, answer = '', gotFirstDelta = false, speakThisRun = true;
 let speakDone = Promise.resolve(), activeController = null;
 let holdListen = false;   // hands-free loop: after each reply, listen again until Control
 
+/* ── activity panel — what Hermes is actually doing mid-run ──
+   Quiet mode used to hide this entirely; runtime.py now surfaces every
+   "$ ls  1.9s" / "reading file…" tool-preview line as its own event instead
+   of hiding it or leaking it into the spoken answer. This panel is the point
+   of that: a live, at-a-glance feed of what's running, so a stall (which is
+   often a dangerous-command approval prompt Hermes can't render without a
+   real terminal — this dashboard has no way to answer one) is visible as a
+   stall instead of just silent "thinking…". */
+let lastRunEventAt = 0, stallHinted = false;
+
+function clearActivity(){
+  $('#activityLog').innerHTML = '';
+  $('#activityBlock').hidden = true;
+  const s = $('#activityState');
+  s.textContent = ''; s.className = 'astate';
+  stallHinted = false;
+}
+
+function addActivity(message, stalled){
+  const box = $('#activityLog');
+  $('#activityBlock').hidden = false;
+  const el = document.createElement('div');
+  el.className = 'aitem' + (stalled ? ' stalled' : '');
+  el.innerHTML = `<b>${stalled ? '⏱' : '▸'}</b><span>${esc(message)}</span>`;
+  box.insertBefore(el, box.firstChild);
+  while (box.children.length > 24) box.removeChild(box.lastChild);
+  const s = $('#activityState');
+  s.textContent = stalled ? 'stalled' : 'running';
+  s.className = 'astate ' + (stalled ? 'stalled' : 'busy');
+}
+
 async function transmit(message, options = {}){
   if (!message.trim()) return;
   if (running){
@@ -943,6 +1031,7 @@ async function transmit(message, options = {}){
     return;
   }
   lastActivity = Date.now();       // restarts the idle clock that re-arms dormant mode
+  stopWakeListening();              // mutual exclusion — the mic is about to be busy
   running = true; answer = ''; gotFirstDelta = false;
   speakThisRun = options.speak !== false;
   holdListen = true;               // every reply returns to listening until Control
@@ -957,11 +1046,22 @@ async function transmit(message, options = {}){
   $('#stop').hidden = false;
   setSubtitle('');
   log('run','RUN',`${id} · ${message.slice(0,70)}`);
+  clearActivity();
+  lastRunEventAt = performance.now();
 
   const t0 = performance.now();
+  const STALL_MS = 8000;
   const tick = setInterval(() => {
-    if (!running || answer) return;
-    setSub(`thinking · ${((performance.now() - t0) / 1000).toFixed(1)}s`);
+    if (!running) return;
+    if (!answer) setSub(`thinking · ${((performance.now() - t0) / 1000).toFixed(1)}s`);
+    const quiet = performance.now() - lastRunEventAt;
+    if (quiet > STALL_MS && !stallHinted){
+      stallHinted = true;
+      addActivity(
+        'No new output for a while — if a tool is asking for approval, it can\'t be answered '
+        + 'from here (headless prompts have no way to render); it will auto-deny and continue on its own.',
+        true);
+    }
   }, 100);
 
   try {
@@ -1005,6 +1105,9 @@ async function transmit(message, options = {}){
 }
 
 function handleEvent(ev){
+  if (ev.t === 'tool' || ev.t === 'delta' || ev.t === 'status' || ev.t === 'latency'){
+    lastRunEventAt = performance.now();      // real progress — the stall hint no longer applies
+  }
   switch (ev.t){
     case 'status':
       if (ev.session_id) $('#sessionTag').textContent = 'session ' + String(ev.session_id).slice(0,12);
@@ -1018,8 +1121,8 @@ function handleEvent(ev){
       break;
 
     case 'tool':
-      log('tool','TOOL', ev.phase === 'use' ? `→ ${ev.name}(${ev.input || ''})`
-                                            : `✓ ${ev.ok === false ? 'error' : 'ok'}`);
+      log('tool','TOOL', ev.message || '');
+      addActivity(ev.message || '');
       break;
 
     case 'delta':
@@ -1032,11 +1135,15 @@ function handleEvent(ev){
       setTag('done','complete');
       log('complete','COMPLETE', ev.ms != null ? `run completed in ${ev.ms}ms` : 'run completed');
       renderAnswer(true);
+      $('#activityState').className = 'astate';
+      $('#activityState').textContent = 'done';
       speakDone = speakThisRun ? speak(answer)
                                : Promise.resolve();
       break;
 
     case 'error':
+      $('#activityState').className = 'astate stalled';
+      $('#activityState').textContent = 'failed';
       setState('fault', (ev.message || 'error').slice(0,46));
       setTag('err','error');
       log('error','ERROR', ev.message || 'unknown');
@@ -1175,6 +1282,7 @@ function goStandby(){
   try { bus.out?.pause(); } catch(_){}
   speechSynth?.cancel();
   stopConvo();
+  syncAmbientWake();                // back to plain standby — listen for the phrase again
 }
 
 function afterTurn(){
@@ -1182,7 +1290,7 @@ function afterTurn(){
   duckWakeSong(false);
   if (dormantOn || waking || running) return;
   if (holdListen) resumeListening();
-  else setState('standby','awaiting uplink');
+  else { setState('standby','awaiting uplink'); syncAmbientWake(); }
 }
 
 function resumeListening(){
@@ -1204,6 +1312,7 @@ function resumeListening(){
 
 async function startConvo(){
   if (convo) { resumeListening(); return; }
+  stopWakeListening();              // mutual exclusion with the ambient wake recognizer
 
   if (RT.stt){
     try {
@@ -1211,6 +1320,7 @@ async function startConvo(){
         {audio:{echoCancellation:true, noiseSuppression:true, autoGainControl:true}});
     } catch(e){
       log('error','VOICE','microphone blocked. Allow it for this page — and note that a plain-http LAN address can never get the mic, only localhost can.');
+      syncAmbientWake();
       return;
     }
     attachMic(micStream);
@@ -1230,6 +1340,7 @@ async function startConvo(){
     return;
   }
   log('error','VOICE','no speech recognition available — add FISH_AUDIO_API_KEY, or use Chrome');
+  syncAmbientWake();
 }
 
 function stopConvo(){
@@ -1648,7 +1759,10 @@ function armWakeRecognizer(){
   wakeRecognition.interimResults = true;
   wakeRecognition.onresult = e => {
     for (let i = e.resultIndex; i < e.results.length; i++){
-      if (WAKE_PHRASE.test(e.results[i][0].transcript)) { handleWake(); return; }
+      if (WAKE_PHRASE.test(e.results[i][0].transcript)) {
+        if (dormantOn) handleWake(); else handleAmbientWake();
+        return;
+      }
     }
   };
   // Chrome silently ends continuous recognition after a stretch of silence.
@@ -1671,6 +1785,29 @@ function handleWake(){
     waking = false;
     transmit('/briefing');         // also stamps lastActivity, restarting the idle clock
   }, 400);
+}
+
+/* Ambient wake — the wake phrase heard while just sitting in plain standby
+   (not the opaque dormant screen). This is what makes it listen "all the
+   time" rather than only right after boot or a long idle: once you hang up
+   with Control, saying the phrase again re-arms listening immediately
+   instead of waiting for WAKE_IDLE_MS. Deliberately does NOT run /briefing
+   or reopen the wake tabs/song — that sequence stays exactly what a real
+   (cold) wake from dormant does; this just starts listening for the next
+   thing you say, the same as pressing the mic button. */
+function ambientListenOk(){
+  return !!SpeechRecognition && !dormantOn && !waking && !running && !convo && !pttArmed;
+}
+function syncAmbientWake(){
+  if (ambientListenOk()) startWakeListening(); else stopWakeListening();
+}
+function handleAmbientWake(){
+  if (!ambientListenOk()) return;      // state may have moved on since this fired
+  log('voice','WAKE','wake phrase heard — listening');
+  lastActivity = Date.now();
+  holdListen = true;
+  stopWakeListening();                 // hand the mic to the real conversation recognizer
+  startConvo();
 }
 
 /* ── the wake jingle ──
@@ -1834,13 +1971,15 @@ setInterval(() => {
       && Date.now() - lastActivity >= WAKE_IDLE_MS) enterDormant();
 }, 5 * 60 * 1000);
 
-/* ══════════════ 10c. Control — hang up / wake ══════════════
-   While the HUD is awake and listening (or speaking), a Control tap hangs up
-   and returns to standby. While dormant, a long-press still wakes it — the
-   keyboard fallback for the wake phrase. Control+K and other chords are
-   ignored so the command palette keeps working. */
+/* ══════════════ 10c. Control — push-to-talk / hang up / wake ══════════════
+   Three jobs on one key, disambiguated by state:
+     - dormant                    → long-press wakes it (keyboard fallback
+                                     for the wake phrase)
+     - awake, standing by         → long-press arms push-to-talk (startPTT)
+     - awake, listening/speaking  → a tap (not a long-press) hangs up
+   Control+K and other chords are ignored so the command palette still works. */
 
-const PTT_HOLD_MS = 320;      // dormant wake long-press
+const PTT_HOLD_MS = 320;      // long-press threshold, for both wake and PTT-arm
 const PTT_SILENCE_MS = 220;
 const PTT_CALIBRATE_MS = 140;
 const PTT_MAX_MS = 15000;
@@ -1857,6 +1996,10 @@ document.addEventListener('keydown', e => {
     ctrlHeld = true; ctrlChord = false;
     if (dormantOn && !pttTimer){
       pttTimer = setTimeout(() => { pttTimer = null; handleWake(); }, PTT_HOLD_MS);
+    } else if (!dormantOn && !waking && !running && !convo && !pttArmed && !pttTimer){
+      // Awake but idle — nothing is already listening, so a long-press arms
+      // push-to-talk instead of doing nothing.
+      pttTimer = setTimeout(() => { pttTimer = null; startPTT(); }, PTT_HOLD_MS);
     }
     return;
   }
@@ -1866,7 +2009,9 @@ document.addEventListener('keyup', e => {
   if (e.key !== 'Control') return;
   ctrlHeld = false;
   if (pttTimer){ clearTimeout(pttTimer); pttTimer = null; }
-  if (pttArmed) stopPTT();
+  // Releasing key that just armed push-to-talk ends that utterance — it is
+  // not also a "hang up" gesture on some other, already-active session.
+  if (pttArmed){ stopPTT(); return; }
   if (ctrlChord || dormantOn || waking) return;
   if (convo || running || holdListen || stateName === 'speaking' || stateName === 'listening'){
     if (running) cancelRun();
@@ -1883,6 +2028,7 @@ window.addEventListener('blur', () => {
 async function startPTT(){
   pttTimer = null;
   if (dormantOn || running || convo || waking) return;
+  stopWakeListening();              // mutual exclusion with the ambient wake recognizer
   micButton(true, 'Listening');
   setState('listening','listening…');
 
@@ -1892,7 +2038,7 @@ async function startPTT(){
         {audio:{echoCancellation:true, noiseSuppression:true, autoGainControl:true}});
     } catch(e){
       log('error','VOICE','microphone blocked — allow it for this page');
-      micButton(false,'Voice'); setState('standby','awaiting uplink');
+      micButton(false,'Voice'); setState('standby','awaiting uplink'); syncAmbientWake();
       return;
     }
     if (!bus.micAnalyser) attachMic(pttStream);
@@ -1927,15 +2073,15 @@ async function startPTT(){
       pttArmed = false; pttRecognition = null;
       micButton(false,'Voice');
       const text = finalText.trim();
-      if (!text){ setState('standby','nothing heard'); return; }
+      if (!text){ setState('standby','nothing heard'); syncAmbientWake(); return; }
       await sendVoiceTurn(text);
     };
-    try { pttRecognition.start(); } catch(_){ pttArmed = false; micButton(false,'Voice'); }
+    try { pttRecognition.start(); } catch(_){ pttArmed = false; micButton(false,'Voice'); syncAmbientWake(); }
     return;
   }
 
   log('error','VOICE','no speech recognition available');
-  micButton(false,'Voice'); setState('standby','awaiting uplink');
+  micButton(false,'Voice'); setState('standby','awaiting uplink'); syncAmbientWake();
 }
 
 function pttTick(){
@@ -1979,18 +2125,19 @@ async function shipPTT(){
   if (pttStream && pttStream !== micStream){ pttStream.getTracks().forEach(t => t.stop()); }
   pttStream = null;
 
-  if (!pttSpoke || blob.size < 900){ setState('standby','nothing heard'); return; }
+  if (!pttSpoke || blob.size < 900){ setState('standby','nothing heard'); syncAmbientWake(); return; }
   setState('transcribing','transcribing…');
   try {
     const r = await api('/api/listen', {
       method:'POST', headers:headers({'content-type': blob.type || 'audio/webm'}), body:blob,
     }).then(r => r.json());
     const text = (r.text || '').trim();
-    if (!text){ log('voice','VOICE','nothing transcribed'); setState('standby','nothing heard'); return; }
+    if (!text){ log('voice','VOICE','nothing transcribed'); setState('standby','nothing heard'); syncAmbientWake(); return; }
     await sendVoiceTurn(text);
   } catch(e){
     log('error','VOICE','transcription failed');
     setState('fault','transcription failed');
+    syncAmbientWake();
   }
 }
 
@@ -2097,6 +2244,13 @@ function bootSequence(){
   await boot;
 
   ROOT_EL.classList.remove('state-boot');
+
+  // COMMANDS and TELEMETRY start open rather than making you press 1/2 every
+  // launch — still toggleable/closeable the normal way. Safe to open under
+  // the opaque dormant overlay (z-index above the drawers): invisible until
+  // the first wake, already there once it is.
+  setDrawer('left', true);
+  setDrawer('right', true);
 
   lastActivity = Date.now();       // boot itself starts the idle clock fresh
   enterDormant();                  // dormant on every launch — see enterDormant() for the fallback
