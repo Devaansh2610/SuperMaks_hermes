@@ -79,6 +79,17 @@ def run(argv, timeout=None):
     if REMOTE:
         target = f"{USER}@{HOST}" if USER else HOST
         remote_cmd = " ".join(shlex.quote(a) for a in argv)
+        # `ssh host cmd` runs a non-interactive, non-login shell, which
+        # skips .zshrc/.zprofile — anything installed under ~/.local/bin,
+        # Homebrew, npm's global bin, etc. is invisible to it even though
+        # it works fine in a normal terminal (this is exactly why `hermes`
+        # came back "command not found" over SSH despite being on PATH
+        # interactively). Prepend the common install locations so it can
+        # actually be found.
+        remote_cmd = (
+            'export PATH="$HOME/.local/bin:$HOME/.npm-global/bin:'
+            '/opt/homebrew/bin:/usr/local/bin:$PATH"; ' + remote_cmd
+        )
         full = ["ssh", *_SSH_OPTS]
         if KEY:
             full += ["-i", KEY]
