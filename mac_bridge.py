@@ -22,6 +22,8 @@ import shutil
 import subprocess
 import sys
 
+import runtime
+
 
 def _hermes_env(name):
     path = pathlib.Path.home() / ".hermes" / ".env"
@@ -138,6 +140,13 @@ def run_hermes_on_mac(request, timeout=180):
     ]
     ok, out = run(argv, timeout=timeout)
     if ok:
-        yield dict(t="delta", text=out)
+        # Non-quiet Hermes output (needed so the streaming path can capture
+        # tool previews) includes a banner/footer/session-echo around the
+        # actual reply. The streaming path filters that line-by-line as it
+        # goes; this is one blocking call with no stream to filter, so the
+        # same cleanup runs here in one pass instead — without it, the
+        # "Resume this session with: hermes --resume …" footer and the rest
+        # end up read aloud verbatim by the mission-complete announcement.
+        yield dict(t="delta", text=runtime.extract_reply_text(out))
     else:
         yield dict(t="error", message=out)

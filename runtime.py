@@ -35,6 +35,39 @@ _CLI_NOISE = re.compile(
 # either leaking into the spoken answer or being silently discarded.
 _TOOL_LINE = re.compile(r"^┊\s*(.*)$")
 
+
+def extract_reply_text(raw_output):
+    """Clean a full, already-captured Hermes stdout blob down to just the
+    spoken reply — the same banner/footer/session-echo/tool-preview lines
+    _run_hermes_locked() filters line-by-line while streaming, applied here
+    in one pass for callers that capture output in one shot instead (e.g.
+    mac_bridge.run_hermes_on_mac(), a single blocking SSH call with no
+    stream to filter as it goes). Without this, that raw blob — the
+    "Resume this session with: hermes --resume …" footer, "Messages: N (1
+    user, …)", tool-preview lines, all of it — gets spoken verbatim.
+    """
+    lines_out = []
+    in_query_echo = False
+    for raw_line in (raw_output or "").splitlines():
+        clean = _ANSI.sub("", raw_line).strip()
+        if not clean:
+            continue
+        if in_query_echo:
+            if clean.lower().startswith("initializing agent"):
+                in_query_echo = False
+            continue
+        if clean.startswith("Query:"):
+            in_query_echo = True
+            continue
+        if re.match(r"^session_id:\s*(\S+)\s*$", clean, re.I):
+            continue
+        if _TOOL_LINE.match(clean):
+            continue
+        if _CLI_NOISE.match(clean):
+            continue
+        lines_out.append(clean)
+    return "\n".join(lines_out).strip()
+
 def env(name, default=""):
     """SUPERMAKS_X, falling back to the old JARVIS_X so an inherited .env still works."""
     return os.environ.get(f"SUPERMAKS_{name}", os.environ.get(f"JARVIS_{name}", default))
