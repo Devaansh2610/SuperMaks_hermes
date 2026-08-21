@@ -216,6 +216,7 @@ reference `SOUL.md` content. `server.py`'s `persona()` now returns only
 | `HERMES_PROFILE` | `default` | profile whose tools are inherited |
 | `HERMES_CMD` | — | absolute path if `hermes` is not on `PATH` |
 | `SUPERMAKS_MODEL` | — | passed to `hermes --model`; use a fast one, latency matters |
+| `SUPERMAKS_REASONING` | `minimal` | passed to `hermes --reasoning`; `none`/`minimal`/`low`/`medium`/`high`/`xhigh`/`max`/`ultra`, or `default` to not pass the flag at all. Nothing capped this before — every turn used to fall back to whatever the profile's own `agent.reasoning_effort` default was, often costing real seconds before any text even starts |
 | `SUPERMAKS_PORT` | `8730` | dashboard port |
 | `SUPERMAKS_PERMISSION` | `normal` | `bypass` lets Hermes run tools unprompted |
 | `SUPERMAKS_TIMEOUT` | `120` | seconds of *silence* (no output at all) before a run is killed |

@@ -74,6 +74,14 @@ def env(name, default=""):
 
 
 MODEL = env("MODEL", "").strip()
+# Nothing was capping this before — Hermes fell back to whatever
+# agent.reasoning_effort the profile's config.yaml defaults to (often
+# "medium" or higher), which costs real, visible seconds before the model
+# even starts producing text, on every single turn, regardless of SOUL.md
+# saying to think less — that's a soft prompt nudge, this is the actual
+# hard parameter. "minimal" for a voice dashboard where speed matters more
+# than depth; override per-deployment if a slower/deeper default is wanted.
+REASONING = env("REASONING", "minimal").strip().lower()
 PROFILE = os.environ.get("HERMES_PROFILE", env("PROFILE", "default")).strip() or "default"
 SOURCE = os.environ.get("HERMES_SOURCE", "supermaks-dashboard").strip() or "supermaks-dashboard"
 WORKDIR = os.path.expanduser(env("WORKDIR", os.getcwd()))
@@ -197,6 +205,8 @@ def build_command(message, session_id=None, system=None):
         cmd += ["--profile", PROFILE]
     if MODEL:
         cmd += ["--model", MODEL]
+    if REASONING and REASONING != "default":
+        cmd += ["--reasoning", REASONING]
     if TOOLSETS:
         cmd += ["--toolsets", TOOLSETS]
     if PERMISSION == "bypass":

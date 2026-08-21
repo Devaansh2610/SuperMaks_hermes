@@ -391,7 +391,7 @@ def handle(message, runner=None):
             "5. One dry, personal aside about something specific you noticed.\n"
             "6. Close with one short offer of something you could do.\n\n"
             "Keep the whole thing tight — about six spoken sentences total."
-        ), note="wake briefing (live fetch)")
+        ), fresh=True, note="wake briefing (live fetch)")
 
     if cmd == "github":
         out = _shell(["gh", "repo", "list", "--limit", "10", "--json", "name,updatedAt,description,url"])

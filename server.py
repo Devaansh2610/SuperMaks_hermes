@@ -326,8 +326,12 @@ class Handler(BaseHTTPRequestHandler):
             return self._json({"ok": True})
 
         if p == "/api/cancel":
+            # Stopping a run early isn't evidence the underlying Hermes
+            # session is broken — same reasoning as the killed-error case in
+            # _stream_run() below, just a second reset path that one didn't
+            # cover: hitting Control/Escape used to nuke the session every
+            # time regardless, which is why conversations kept restarting.
             stopped = runtime.cancel_active()
-            SESSION["id"] = None
             return self._json({"ok": True, "stopped": stopped})
 
         if p == "/api/wake/open-tabs":
