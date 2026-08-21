@@ -185,12 +185,19 @@ server.py      local HTTP API and NDJSON streaming
 runtime.py     Hermes CLI subprocess and session continuity
 commands.py    slash commands and the mission queue
 voice.py       Fish Audio speech synthesis
-persona.md     the spoken SuperMaks persona
 build-preview.py  bundles ui/ into the single-file preview
 ```
 
 No fonts, no libraries, no CDN — it has to work bound to `127.0.0.1` with the
 network unplugged.
+
+**On this branch, there's no `persona.md`.** The SuperMaks voice, brevity
+rules, and tool policy live in Hermes' own `SOUL.md` (on Ubuntu, in the
+dual-Hermes setup) instead — loaded fresh by Hermes itself on every message,
+so nothing needs injecting from this end at all. `dual-setup/` has the
+reference `SOUL.md` content. `server.py`'s `persona()` now returns only
+`commands.context_block()` — genuinely dynamic per-request state
+(profile/goal/personality/mission queue) that a static file can't hold.
 
 ## Configuration
 
@@ -264,9 +271,10 @@ Read-only/routine commands (`ssh`, `git status`, `ls`, `pwd`, `cat`, `mkdir`,
 default already; verify any command's real verdict with
 `hermes approvals test -- <command>`.
 
-`persona.md` also tells the model to default to the terminal/SSH tool for
-anything on the Mac, and never reach for `computer_use` (GUI automation)
-unless the current message explicitly asks for screen/click interaction.
+Ubuntu's `SOUL.md` also tells the model to default to the terminal/SSH tool
+for anything on the Mac, that `computer_use` is disabled and should never be
+attempted (say so plainly if asked), and to reach for `/mac` instead for the
+rare task that genuinely needs real screen interaction — see `dual-setup/`.
 
 There is still no dashboard-side approve/deny UI for commands that fall
 outside this fixed list (Hermes' own dangerous-pattern detector still flags

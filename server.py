@@ -170,19 +170,14 @@ end tell
 # drops back into "asleep, waiting to be woken" on its own.
 WAKE_IDLE_HOURS = float(env("WAKE_IDLE_HOURS", "4.5"))
 
-# The SuperMaks persona, appended to every run. Without it, the model answers as
-# a coding agent and narrates its own tooling — which is not what you want spoken
-# out loud. Edit persona.md to change how it talks.
-_PERSONA_FILE = ROOT / "persona.md"
-
-
+# The SuperMaks persona used to be injected into every request from
+# persona.md here — now it lives in Hermes' own SOUL.md on Ubuntu, loaded
+# fresh by Hermes itself on every message, so nothing needs sending from
+# this end at all. What's left to inject per-request is just genuinely
+# dynamic state SOUL.md can't hold: profile facts / goal / personality
+# overlay / mission queue, all mutable at runtime via /profile, /goal, etc.
 def persona():
-    try:
-        base = _PERSONA_FILE.read_text(encoding="utf-8").strip()
-    except OSError:
-        base = ""
-    extra = commands.context_block()      # profile / goal / personality / queue
-    return "\n\n".join(x for x in (base, extra) if x)
+    return commands.context_block()
 
 
 # One continuing Hermes conversation until the user hits /new.
@@ -368,14 +363,13 @@ class Handler(BaseHTTPRequestHandler):
         if fresh:
             SESSION["id"] = None
 
-        # Persona + profile/goal/personality context only needs to reach
-        # Hermes once — --resume carries the rest of the conversation,
-        # including that first turn, so resending the full block on every
-        # turn of an ongoing session just duplicates it into the transcript
-        # and grows every later request's input for no benefit.
+        # persona() is now just profile/goal/personality/mission-queue —
+        # small, and mutable at runtime (via /profile, /goal, ...) — so it's
+        # sent every turn rather than only the first: the old "only on a
+        # fresh session" gate existed specifically because persona.md used
+        # to make this block big enough that repeating it was real waste.
+        # That's gone; this isn't worth gating.
         def system_for_turn():
-            if SESSION["id"]:
-                return extra or None
             return "\n\n".join(x for x in (persona(), extra) if x) or None
 
         system = system_for_turn()

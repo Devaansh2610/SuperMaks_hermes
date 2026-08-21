@@ -22,7 +22,6 @@ cd "$(dirname "${BASH_SOURCE[0]}")"
 source ./lib.sh
 
 CONFIG_FILE="$HOME/.hermes-dual-setup.conf"
-WORKER_DIR="$HOME/Desktop/hermes-dual-setup/mac-worker"
 
 if [[ "$OSTYPE" != darwin* ]]; then
   fail "This script is for the Mac. Run setup-ubuntu.sh on the Ubuntu box instead."
@@ -33,7 +32,7 @@ echo "${BOLD}SuperMaks dual-Hermes — Mac Worker setup${RESET}"
 echo "${DIM}Every step below checks what's already done first — safe to re-run this any time.${RESET}"
 
 # ── 1. Homebrew ─────────────────────────────────────────────
-section "1/8  Homebrew"
+section "1/5  Homebrew"
 if have brew; then
   ok "Homebrew present"
 else
@@ -44,7 +43,7 @@ else
 fi
 
 # ── 2. Tailscale ─────────────────────────────────────────────
-section "2/8  Tailscale"
+section "2/5  Tailscale"
 if ! have tailscale; then
   say "Installing Tailscale..."
   brew install tailscale && ok "installed" || { fail "brew install tailscale failed"; exit 1; }
@@ -64,7 +63,7 @@ fi
 MAC_TAILSCALE_IP="$(tailscale ip -4 2>/dev/null || echo "?")"
 
 # ── 3. Hermes + computer_use ────────────────────────────────
-section "3/8  Hermes + computer_use"
+section "3/5  Hermes + computer_use"
 if have hermes; then
   ok "Hermes present ($(hermes --version 2>/dev/null | head -1))"
 else
@@ -105,7 +104,7 @@ else
 fi
 
 # ── 4. SSH server ────────────────────────────────────────────
-section "4/8  Remote Login (SSH server)"
+section "4/5  Remote Login (SSH server)"
 if sudo systemsetup -getremotelogin 2>/dev/null | grep -qi "on"; then
   ok "Remote Login already on"
 else
@@ -118,7 +117,7 @@ info "If your Mac firewall is on: System Settings → Network → Firewall → O
 info "'Block all incoming connections' is OFF, or that Terminal/sshd is allowed."
 
 # ── 5. Ubuntu's SSH key ─────────────────────────────────────
-section "5/8  Authorize the Ubuntu controller's SSH key"
+section "5/5  Authorize the Ubuntu controller's SSH key"
 mkdir -p "$HOME/.ssh" && chmod 700 "$HOME/.ssh"
 if [ -f "$HOME/.ssh/authorized_keys" ] && [ -s "$HOME/.ssh/authorized_keys" ] \
    && confirm "authorized_keys already has entries — skip adding another key?" y; then
@@ -140,68 +139,17 @@ else
   fi
 fi
 
-# ── 6. tmux ──────────────────────────────────────────────────
-section "6/8  tmux"
-if have tmux; then
-  ok "tmux present"
-else
-  say "Installing tmux..."
-  brew install tmux
-fi
-
-# ── 7. worker start script + LaunchAgent ────────────────────
-section "7/8  Hermes Worker startup script"
-mkdir -p "$WORKER_DIR"
-cat > "$WORKER_DIR/start-hermes-worker.sh" <<'EOF'
-#!/bin/bash
-SESSION="hermes-worker"
-tmux kill-session -t "$SESSION" 2>/dev/null
-tmux new-session -d -s "$SESSION" -x 120 -y 40 'hermes -t computer_use chat -q "Hermes Worker ready on Mac"'
-echo "Started $SESSION — attach with: tmux attach -t $SESSION"
-EOF
-chmod +x "$WORKER_DIR/start-hermes-worker.sh"
-ok "wrote $WORKER_DIR/start-hermes-worker.sh"
-
-PLIST="$HOME/Library/LaunchAgents/com.supermaks.hermes-worker.plist"
-if [ -f "$PLIST" ]; then
-  ok "auto-start on login already set up"
-elif confirm "Start the Hermes Worker automatically every time you log in?" y; then
-  mkdir -p "$HOME/Library/LaunchAgents"
-  cat > "$PLIST" <<EOF
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0"><dict>
-  <key>Label</key><string>com.supermaks.hermes-worker</string>
-  <key>ProgramArguments</key><array>
-    <string>$WORKER_DIR/start-hermes-worker.sh</string>
-  </array>
-  <key>RunAtLoad</key><true/>
-</dict></plist>
-EOF
-  launchctl unload "$PLIST" 2>/dev/null || true
-  launchctl load "$PLIST" && ok "installed LaunchAgent — will start on every login" \
-    || warn "LaunchAgent didn't load; start it manually with the script above"
-else
-  info "skipped — start it yourself with: $WORKER_DIR/start-hermes-worker.sh"
-fi
-
-# ── 8. start it now + verify ─────────────────────────────────
-section "8/8  Starting the worker"
-"$WORKER_DIR/start-hermes-worker.sh"
-sleep 2
-if tmux has-session -t hermes-worker 2>/dev/null; then
-  ok "hermes-worker tmux session is running"
-else
-  fail "session didn't start — check: hermes doctor"
-fi
-
 echo ""
 echo "${BOLD}════════════════════════════════════════════════════════════${RESET}"
-echo "${BOLD} Mac Worker is set up.${RESET}"
+echo "${BOLD} Mac side is set up.${RESET}"
 echo "${BOLD}════════════════════════════════════════════════════════════${RESET}"
 echo ""
 echo "  Mac username:      ${DIM}$(whoami)${RESET}"
 echo "  Mac Tailscale IP:  ${BOLD}${MAC_TAILSCALE_IP}${RESET}   ${DIM}← you'll need this on Ubuntu${RESET}"
 echo ""
+echo "  Nothing needs to keep running here — no worker process, no tmux session."
+echo "  /mac requests spin up their own fresh 'hermes -t computer_use chat' over SSH"
+echo "  each time; what matters is already done above: computer_use enabled +"
+echo "  permissioned, and sshd on. Verify any time with: hermes computer-use doctor"
+echo ""
 echo "  Now run setup-ubuntu.sh on the Ubuntu box, and give it the two values above."
-echo "  View worker logs any time: tmux attach -t hermes-worker  (Ctrl+B, D to detach)"

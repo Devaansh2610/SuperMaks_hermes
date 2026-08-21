@@ -167,14 +167,13 @@ def runtime_kind():
 
 
 def build_command(message, session_id=None, system=None):
-    # Hermes chat has no separate --system flag. Put the voice persona and the
-    # current request into one explicit turn so the model answers as SuperMaks
-    # instead of narrating its CLI/runtime.
-    prompt = message
-    if system:
-        prompt = (f"{system}\n\nRequest: {message}\n\n"
-                  "Reply with only what SuperMaks should say aloud — no session IDs, "
-                  "metadata, headings, or narration.")
+    # The SuperMaks voice, brevity, and "no narration/metadata" rules now
+    # live in Hermes' own SOUL.md (loaded fresh every message by Hermes
+    # itself) rather than being injected here — system, when present, is
+    # just genuinely dynamic per-request state (profile/goal/personality/
+    # mission queue) that SOUL.md can't hold. Prepend it plainly; nothing
+    # else needs restating every turn.
+    prompt = f"{system}\n\n{message}" if system else message
     # Deliberately NOT -Q (quiet): quiet mode's own --help says it suppresses
     # "tool previews" — exactly the "$ ls  1.9s" / "reading file…" lines the
     # dashboard's Activity panel is built to show. Non-quiet, non-TTY output

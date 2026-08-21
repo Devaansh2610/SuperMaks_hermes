@@ -28,6 +28,22 @@ sign-in, granting macOS Accessibility/Screen Recording, one password prompt).
    clones/updates the dashboard, and starts both `hermes-main` and
    `dashboard` in tmux.
 
+3. **Also on Ubuntu**, one manual step neither script does yet: replace
+   `~/.hermes/SOUL.md` with the contents of [`SOUL.md`](SOUL.md) in this
+   directory (back up the existing one first — `cp ~/.hermes/SOUL.md
+   ~/.hermes/SOUL.md.bak`). Hermes loads `SOUL.md` fresh on every message, so
+   this is what actually gives Ubuntu's Hermes the SuperMaks persona, the
+   "computer_use is disabled here, say so plainly" instruction, and the
+   search-then-terminal policy for reaching the Mac — none of which
+   `server.py` injects per-request anymore (see the main README's
+   Architecture section).
+
+Note there's no ongoing process to keep running on the Mac side — `/mac`
+requests spin up their own fresh `hermes -t computer_use chat` over SSH each
+time, so nothing there needs to stay alive between requests. `setup-mac.sh`
+reflects this: it gets `computer_use` enabled/permissioned and `sshd` on,
+then it's done.
+
 Both scripts also call `apply_command_denylist` (in `lib.sh`) right after
 Hermes is confirmed installed — hard-blocks `rm -rf`, `sudo`, `mkfs`, `dd`,
 `shutdown`, `reboot`, `kill -9`, `git reset --hard`, and `git push --force` in
