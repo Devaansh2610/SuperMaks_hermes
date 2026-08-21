@@ -207,8 +207,26 @@ def build_command(message, session_id=None, system=None):
     return cmd
 
 
-def hermes_tools_snapshot(limit=36):
-    """Return a compact list of enabled/visible Hermes toolsets/tools for UI status."""
+# hermes_tools_snapshot() used to run a full separate `hermes tools list`
+# subprocess on EVERY message — a second complete Hermes CLI cold start,
+# every single turn, just to count tool names for a cosmetic status line
+# that's also already available live on demand via /tools. That's most of
+# why the dashboard felt slower than typing straight into Hermes: every
+# message paid for two cold starts back to back instead of one. Toolsets
+# essentially never change mid-session (only via a manual `hermes tools
+# enable/disable`), so this is cached instead of recomputed every turn.
+_TOOLS_SNAPSHOT = {"at": 0.0, "data": None}
+_TOOLS_SNAPSHOT_TTL = float(env("TOOLS_SNAPSHOT_TTL", "300"))
+
+
+def hermes_tools_snapshot(limit=36, force=False):
+    """Return a compact list of enabled/visible Hermes toolsets/tools for UI
+    status. Cached for TOOLS_SNAPSHOT_TTL seconds (default 300) — pass
+    force=True to bypass the cache and re-check right now."""
+    now = time.monotonic()
+    cached = _TOOLS_SNAPSHOT["data"]
+    if not force and cached is not None and (now - _TOOLS_SNAPSHOT["at"]) < _TOOLS_SNAPSHOT_TTL:
+        return cached
     try:
         base = _hermes_base()
         proc = subprocess.run(base + ["tools", "list"], cwd=WORKDIR, text=True,
@@ -224,9 +242,14 @@ def hermes_tools_snapshot(limit=36):
                 tools.append(clean[:80])
             if len(tools) >= limit:
                 break
-        return tools or [out[:120]] if out else []
+        result = tools or [out[:120]] if out else []
     except Exception:
-        return []
+        # A failed refresh shouldn't blank out a perfectly good prior result —
+        # keep serving the last known-good snapshot instead.
+        return cached if cached is not None else []
+    _TOOLS_SNAPSHOT["data"] = result
+    _TOOLS_SNAPSHOT["at"] = now
+    return result
 
 
 def run_hermes(message, session_id=None, system=None):
