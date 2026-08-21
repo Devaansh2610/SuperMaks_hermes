@@ -47,6 +47,13 @@ WORKDIR = os.path.expanduser(env("WORKDIR", os.getcwd()))
 PERMISSION = env("PERMISSION", os.environ.get("HERMES_PERMISSION", "normal")).strip().lower()
 RUNTIME = env("RUNTIME", "auto").strip().lower()  # auto|hermes|mock
 IDLE_TIMEOUT = int(env("TIMEOUT", "120"))
+# IDLE_TIMEOUT only fires on a GAP with zero output — a run that keeps
+# trickling the occasional line (a slow tool call over the SSH-to-Mac
+# backend, a retry loop) never goes idle long enough to trip it and can run
+# forever, holding RUN_LOCK the whole time and 409-blocking every wake behind
+# it. This is the independent wall-clock cap: total time, no matter how much
+# output showed up along the way.
+MAX_RUN_SECONDS = int(env("MAX_RUN_SECONDS", "300"))
 # Raw transcripts can contain private prompts. Logging is off by default.
 RAW_LOG = env("RAW_LOG", "").strip()
 TOOLSETS = os.environ.get("HERMES_TOOLSETS", "").strip()
@@ -119,9 +126,9 @@ def build_command(message, session_id=None, system=None):
     # instead of narrating its CLI/runtime.
     prompt = message
     if system:
-        prompt = (f"{system}\n\n## Current user request\n{message}\n\n"
-                  "Answer the request now. Return only the words SuperMaks should say aloud; "
-                  "never include session IDs, runtime metadata, headings, or process narration.")
+        prompt = (f"{system}\n\nRequest: {message}\n\n"
+                  "Reply with only what SuperMaks should say aloud — no session IDs, "
+                  "metadata, headings, or narration.")
     # Deliberately NOT -Q (quiet): quiet mode's own --help says it suppresses
     # "tool previews" — exactly the "$ ls  1.9s" / "reading file…" lines the
     # dashboard's Activity panel is built to show. Non-quiet, non-TTY output
@@ -250,6 +257,14 @@ def _run_hermes_locked(message, session_id=None, system=None):
     in_query_echo = False
     try:
         while not done.is_set() or q:
+            # Checked every iteration, not just while idle — a run that keeps
+            # trickling output never hits the idle-gap check below at all.
+            if (_mono_ms() - started) / 1000 > MAX_RUN_SECONDS:
+                proc.kill()
+                err = " | ".join(list(errbuf)[-3:])
+                yield dict(t="error", message=(
+                    f"Hermes ran for over {MAX_RUN_SECONDS}s and was stopped. " + err)[:400])
+                return
             line = None
             with lock:
                 if q:

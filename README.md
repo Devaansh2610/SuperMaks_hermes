@@ -211,7 +211,8 @@ network unplugged.
 | `SUPERMAKS_MODEL` | — | passed to `hermes --model`; use a fast one, latency matters |
 | `SUPERMAKS_PORT` | `8730` | dashboard port |
 | `SUPERMAKS_PERMISSION` | `normal` | `bypass` lets Hermes run tools unprompted |
-| `SUPERMAKS_TIMEOUT` | `120` | seconds of silence before a run is killed |
+| `SUPERMAKS_TIMEOUT` | `120` | seconds of *silence* (no output at all) before a run is killed |
+| `SUPERMAKS_MAX_RUN_SECONDS` | `300` | total wall-clock seconds before a run is killed regardless of output — catches a run that trickles just enough to dodge the idle timeout and would otherwise hold the lock (and block every wake behind it) indefinitely |
 
 Old `JARVIS_*` variables are still read as a fallback.
 

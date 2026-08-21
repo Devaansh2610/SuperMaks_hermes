@@ -362,12 +362,23 @@ class Handler(BaseHTTPRequestHandler):
             return self._json({"error": "bad json"}, 400)
         message = (payload.get("message") or "").strip()
         extra = (payload.get("system") or "").strip()
-        system = "\n\n".join(x for x in (persona(), extra) if x) or None
         fresh = bool(payload.get("fresh"))
         if not message:
             return self._json({"error": "empty message"}, 400)
         if fresh:
             SESSION["id"] = None
+
+        # Persona + profile/goal/personality context only needs to reach
+        # Hermes once — --resume carries the rest of the conversation,
+        # including that first turn, so resending the full block on every
+        # turn of an ongoing session just duplicates it into the transcript
+        # and grows every later request's input for no benefit.
+        def system_for_turn():
+            if SESSION["id"]:
+                return extra or None
+            return "\n\n".join(x for x in (persona(), extra) if x) or None
+
+        system = system_for_turn()
 
         self.send_response(200)
         self.send_header("Content-Type", "application/x-ndjson")
@@ -394,7 +405,7 @@ class Handler(BaseHTTPRequestHandler):
                 emit(dict(t="complete", ms=0))
                 return
             message = cmd["message"]
-            system = "\n\n".join(x for x in (persona(), extra) if x) or None
+            system = system_for_turn()
 
         try:
             for ev in runtime.run(message, SESSION["id"], system):
