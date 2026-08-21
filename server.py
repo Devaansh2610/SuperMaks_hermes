@@ -415,7 +415,12 @@ class Handler(BaseHTTPRequestHandler):
                 sid = ev.get("session_id")
                 if ev.get("t") == "complete" and runtime.valid_session(sid):
                     SESSION["id"] = sid
-                if ev.get("t") == "error":
+                # A cancel or a watchdog kill (ev["killed"]) stopped OUR process
+                # because a turn ran too long — it isn't Hermes reporting the
+                # session itself is broken, so keep it and let the next message
+                # resume the conversation. Only a genuine failure (bad exit,
+                # can't launch, --resume itself rejected) drops it.
+                if ev.get("t") == "error" and not ev.get("killed"):
                     SESSION["id"] = None       # drop a stale session so the next run is fresh
                 emit(ev)
         except (BrokenPipeError, ConnectionResetError):

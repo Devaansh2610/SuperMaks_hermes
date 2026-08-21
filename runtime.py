@@ -68,13 +68,26 @@ _ACTIVE_LOCK = threading.Lock()
 
 
 def cancel_active():
-    """Terminate the currently running Hermes child process, if any."""
+    """Terminate the currently running Hermes child process, if any.
+
+    SIGTERM first, then SIGKILL shortly after if it's still alive. A process
+    stuck deep in a blocked call (network I/O, its own hung approval prompt)
+    can simply not get around to noticing SIGTERM — and a cancel that doesn't
+    actually stop anything leaves RUN_LOCK held server-side, silently
+    rejecting every request behind it until the idle/wall-clock watchdogs
+    eventually clean it up (which is what SIGKILL, unconditional, guarantees
+    here instead of waiting on that).
+    """
     with _ACTIVE_LOCK:
         proc = _ACTIVE_PROC
     if proc is None or proc.poll() is not None:
         return False
     try:
         proc.terminate()
+        try:
+            proc.wait(timeout=2)
+        except subprocess.TimeoutExpired:
+            proc.kill()
         return True
     except Exception:
         return False
@@ -136,7 +149,16 @@ def build_command(message, session_id=None, system=None):
     # just a banner/footer wrapped around the answer, which _CLI_NOISE below
     # strips, plus the tool-preview lines _TOOL_LINE below captures instead
     # of letting them leak into the spoken answer.
-    cmd = _hermes_base() + ["chat", "-q", prompt, "--source", SOURCE]
+    # --no-restore-cwd: a resumed session otherwise `cd`s the terminal tool
+    # back into whatever directory it last recorded. Under terminal.backend:
+    # ssh that recorded path is whichever machine's filesystem the terminal
+    # tool happened to be pointed at when it was captured — nothing here
+    # guarantees it still matches, and if it doesn't, every terminal command
+    # for the rest of the session fails at that first `cd`, before the
+    # model's actual command ever runs. SuperMaks already sets its own cwd
+    # for the Hermes process itself (WORKDIR, below); Hermes doesn't need to
+    # additionally restore one of its own on top of that.
+    cmd = _hermes_base() + ["chat", "-q", prompt, "--source", SOURCE, "--no-restore-cwd"]
     if valid_session(session_id):
         cmd += ["--resume", str(session_id)]
     if PROFILE and PROFILE != "default":
@@ -262,7 +284,7 @@ def _run_hermes_locked(message, session_id=None, system=None):
             if (_mono_ms() - started) / 1000 > MAX_RUN_SECONDS:
                 proc.kill()
                 err = " | ".join(list(errbuf)[-3:])
-                yield dict(t="error", message=(
+                yield dict(t="error", killed=True, message=(
                     f"Hermes ran for over {MAX_RUN_SECONDS}s and was stopped. " + err)[:400])
                 return
             line = None
@@ -275,7 +297,7 @@ def _run_hermes_locked(message, session_id=None, system=None):
                 if time.monotonic() - last > IDLE_TIMEOUT:
                     proc.kill()
                     err = " | ".join(list(errbuf)[-3:])
-                    yield dict(t="error", message=(f"Hermes went quiet for {IDLE_TIMEOUT}s and was stopped. " + err)[:400])
+                    yield dict(t="error", killed=True, message=(f"Hermes went quiet for {IDLE_TIMEOUT}s and was stopped. " + err)[:400])
                     return
                 time.sleep(0.05)
                 continue
@@ -318,7 +340,12 @@ def _run_hermes_locked(message, session_id=None, system=None):
                 emitted_session = session_match.group(1)
         if rc != 0:
             err = " | ".join(list(errbuf)[-6:])
-            yield dict(t="error", message=(err or f"Hermes exited with code {rc}")[:500])
+            # A negative code means it died from a signal (SIGTERM/SIGKILL) —
+            # i.e. we killed it ourselves (cancel_active(), a watchdog above),
+            # not Hermes reporting its own failure. That's not evidence the
+            # underlying session is broken, just that this turn didn't finish.
+            yield dict(t="error", killed=(rc < 0),
+                       message=(err or f"Hermes exited with code {rc}")[:500])
             return
         if not text_seen:
             yield dict(t="delta", text="Hermes completed without textual output.")
