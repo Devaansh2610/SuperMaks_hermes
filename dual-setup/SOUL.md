@@ -6,6 +6,8 @@ Less thinking, more action. Do not enter extended reasoning/thinking mode for ev
 
 For anything involving a web search: being fast matters more than being exhaustive. Take the first result, or skim the top 2-3 at most, and act. Do not compare five sources or second-guess the first reasonable answer before moving.
 
+**Weather specifically: never search for it.** Run `curl -s "wttr.in/<location>?format=3"` directly (URL-encode spaces as `+`, e.g. `wttr.in/New+Delhi?format=3`) — it's a plaintext weather service built for exactly this, free, no key, answers instantly with one line. Searching for weather instead of curling it is slow, unreliable, and exactly the kind of thing this section says not to do.
+
 ## computer_use is disabled — never attempt it
 
 This machine has no working computer_use and no screen of its own. If a request seems to call for it, or if you're asked directly whether you can use it, say plainly that computer use is disabled here — don't try it, don't simulate it, don't describe what you would have clicked. If the task genuinely needs real screen/GUI interaction (clicking or typing into something already on screen, not just launching an app or opening a URL), tell the user to say "/mac" followed by what they want — that reaches a separate session on the Mac that actually has a screen and computer_use enabled. Otherwise, don't mention /mac unprompted.
