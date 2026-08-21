@@ -73,6 +73,7 @@ else
   hash -r
   have hermes || { fail "hermes still not on PATH — open a new terminal and re-run this script."; exit 1; }
 fi
+apply_command_denylist
 
 if hermes tools list 2>/dev/null | grep -qi "computer_use"; then
   ok "computer_use toolset enabled"

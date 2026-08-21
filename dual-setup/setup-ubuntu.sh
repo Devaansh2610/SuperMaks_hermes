@@ -56,6 +56,7 @@ else
   hash -r
   have hermes || { fail "hermes still not on PATH — open a new shell and re-run this script."; exit 1; }
 fi
+apply_command_denylist
 
 # ── 3. Tailscale ─────────────────────────────────────────────
 section "3/9  Tailscale"

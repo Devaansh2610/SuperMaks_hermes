@@ -28,6 +28,14 @@ sign-in, granting macOS Accessibility/Screen Recording, one password prompt).
    clones/updates the dashboard, and starts both `hermes-main` and
    `dashboard` in tmux.
 
+Both scripts also call `apply_command_denylist` (in `lib.sh`) right after
+Hermes is confirmed installed — hard-blocks `rm -rf`, `sudo`, `mkfs`, `dd`,
+`shutdown`, `reboot`, `kill -9`, `git reset --hard`, and `git push --force` in
+`~/.hermes/config.yaml`'s `approvals.deny`, on whichever machine's Hermes is
+the one actually receiving tool calls (Ubuntu's, in this setup). See the
+README's Security section for why a hard deny beats Hermes' normal "ask"
+prompt in a headless dashboard.
+
 ## Re-running
 
 Both scripts are idempotent — every step checks its own precondition first.

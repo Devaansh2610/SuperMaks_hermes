@@ -76,10 +76,6 @@ WAKE_TABS = [u.strip() for u in env(
 # The .app SuperMaks asks macOS to open the wake links in.
 WAKE_BROWSER_APP = env("WAKE_BROWSER_APP", "Safari")
 
-# Each wake window's width/height as a fraction of the screen — full-size
-# windows are overkill for a link you're glancing at, not reading.
-WAKE_WINDOW_SCALE = float(env("WAKE_WINDOW_SCALE", "0.45"))
-
 
 def _applescript_string(u):
     return u.replace("\\", "\\\\").replace('"', '\\"')
@@ -104,10 +100,28 @@ def _screen_size():
     return 1440, 900
 
 
+def _tile_layout(n, screen_w, screen_h):
+    """First window gets the left HALF of the screen (full height); every
+    other window splits the right half into equal QUARTER-height strips
+    (literally quarters when there are 2 of them, thinner if there are more)
+    — a deliberate, readable tiling instead of a uniform small-scale stack.
+    Returns a list of (x0, y0, x1, y1), one per window, index-aligned to urls.
+    """
+    half_w = screen_w // 2
+    rects = [(0, 0, half_w, screen_h)]
+    remaining = max(1, n - 1)
+    strip_h = screen_h // remaining
+    for i in range(n - 1):
+        y0 = i * strip_h
+        y1 = screen_h if i == remaining - 1 else y0 + strip_h
+        rects.append((half_w, y0, screen_w, y1))
+    return rects
+
+
 def open_wake_links(urls):
     """Ask macOS to open every wake URL as its own separate new browser
-    window, each sized to WAKE_WINDOW_SCALE of the screen and cascaded so
-    they don't land exactly on top of each other.
+    window, tiled — first one half the screen, the rest quartered into the
+    other half — instead of a uniform stack.
 
     `window.open()` from the page itself can't do this reliably: Chrome only
     honors popup-window features (and only avoids merging consecutive calls
@@ -123,14 +137,7 @@ def open_wake_links(urls):
     if not mac_bridge.available():
         return False, "no Mac reachable"
     screen_w, screen_h = _screen_size()
-    win_w = round(screen_w * WAKE_WINDOW_SCALE)
-    win_h = round(screen_h * WAKE_WINDOW_SCALE)
-    cascade = 36  # px offset per successive window, so a stack is visible
-
-    def bounds(i):
-        x = min(i * cascade, max(0, screen_w - win_w))
-        y = min(i * cascade, max(0, screen_h - win_h))
-        return x, y, x + win_w, y + win_h
+    rects = _tile_layout(len(urls), screen_w, screen_h)
 
     if WAKE_BROWSER_APP.strip().lower() == "safari":
         # `set bounds of <the document var>` reliably fails right after
@@ -139,8 +146,7 @@ def open_wake_links(urls):
         # yet at that point. `front window` right after creation is the new
         # window every time and accepts bounds immediately; verified live.
         lines = []
-        for i, u in enumerate(urls):
-            x0, y0, x1, y1 = bounds(i)
+        for u, (x0, y0, x1, y1) in zip(urls, rects):
             lines.append(
                 f'make new document with properties {{URL:"{_applescript_string(u)}"}}\n'
                 f'    set bounds of front window to {{{x0}, {y0}, {x1}, {y1}}}')
@@ -151,11 +157,10 @@ tell application "Safari"
     {opens}
 end tell
 ''')
-    for i, u in enumerate(urls):
-        x0, y0, _, _ = bounds(i)
+    for u, (x0, y0, x1, y1) in zip(urls, rects):
         ok, reason = mac_bridge.run(
             ["open", "-na", WAKE_BROWSER_APP, "--args", "--new-window",
-             f"--window-size={win_w},{win_h}", f"--window-position={x0},{y0}", u])
+             f"--window-size={x1 - x0},{y1 - y0}", f"--window-position={x0},{y0}", u])
         if not ok:
             return False, reason
     return True, None

@@ -218,10 +218,10 @@ const reactor = (() => {
 
   let W = 0, H = 0, dpr = 1, cx = 0, cy = 0, R = 0;
   // t drives every mechanical rotation (gears, actuators, coil sweep, LED
-  // chase) and only advances while live() — so standby holds its pose
-  // instead of spinning forever behind nothing. idleT never stops: it drives
-  // the gentle standby breathing so the default state reads as "calm", not
-  // "frozen/broken".
+  // chase) — always advancing, listening/speaking or not. idleT is the same
+  // clock but used specifically for the standby breathing target, kept
+  // separate so that math reads clearly regardless of whether t ever gets
+  // gated again in the future.
   let t = 0, idleT = 0, level = 0, raf = 0, frame = 0, lastDraw = 0;
   let acc = '#37e6d0', acc2 = '#7ef4ff';
   let discharge = [], sparks = [];
@@ -582,7 +582,7 @@ const reactor = (() => {
     lastDraw = now;
     frame++;
     idleT += dt * rate;
-    if (live()) t += dt * rate;
+    t += dt * rate;          // always spins now — no live()-only gate
 
     if (frame % 15 === 0){
       const cs = getComputedStyle(ROOT_EL);
@@ -811,8 +811,8 @@ const reactor = (() => {
     }
     ctx.restore();
 
-    // ── discharge (skip while idle — particles were burning GPU for a screensaver)
-    if (!reduce && live() && Math.random() < .08 + level * .5) spawnDischarge();
+    // ── discharge
+    if (!reduce && Math.random() < .08 + level * .5) spawnDischarge();
     ctx.save(); ctx.globalCompositeOperation = 'lighter'; ctx.lineCap = 'round';
     discharge = discharge.filter(d => {
       d.life -= .085;
@@ -877,7 +877,7 @@ const reactor = (() => {
     ctx.restore();
 
     // ── sparks
-    if (!reduce && live() && sparks.length < 18 && Math.random() < .18){
+    if (!reduce && sparks.length < 18 && Math.random() < .18){
       sparks.push({ a: Math.random() * TAU, r: R * (.28 + Math.random() * .3),
                     v: (Math.random() - .5) * .012, life: 1, s: Math.random() });
     }
@@ -905,12 +905,11 @@ const reactor = (() => {
     drawIdeaNodes();
   }
 
-  // ── idea nodes: only while it's actually engaged (listening/speaking/
-  // thinking/transcribing). Nodes brighten on their own rhythm and draw a
+  // ── idea nodes: always on. Nodes brighten on their own rhythm and draw a
   // line to each other node they currently overlap with in brightness — a
   // loose "connecting thoughts" read, not a literal diagram of anything.
   function drawIdeaNodes(){
-    if (reduce || !live()) return;
+    if (reduce) return;
     const pts = nodeSeed.map(n => {
       const rad = R * n.rr + Math.sin(t * .6 + n.ph) * R * .018;
       return {

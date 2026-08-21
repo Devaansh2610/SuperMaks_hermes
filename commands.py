@@ -14,7 +14,10 @@ import shutil
 import subprocess
 import threading
 import time
+import urllib.error
+import urllib.request
 import uuid
+import xml.etree.ElementTree as ET
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta
 
@@ -198,6 +201,70 @@ def _lines_from_json(raw, formatter, empty_note):
     return raw[:1800]
 
 
+# ── weather + news: free, keyless APIs, fetched directly instead of asking
+# the model to browse for them. A browser/web-search tool call is a whole
+# extra reasoning+network round trip through the model; a raw HTTP GET here
+# takes well under a second and runs in the same thread pool as gmail/cal/gh.
+_DELHI_LAT, _DELHI_LON = "28.6139", "77.2090"
+
+_WMO_WEATHER_CODES = {
+    0: "clear sky", 1: "mainly clear", 2: "partly cloudy", 3: "overcast",
+    45: "fog", 48: "depositing rime fog",
+    51: "light drizzle", 53: "moderate drizzle", 55: "dense drizzle",
+    56: "light freezing drizzle", 57: "dense freezing drizzle",
+    61: "slight rain", 63: "moderate rain", 65: "heavy rain",
+    66: "light freezing rain", 67: "heavy freezing rain",
+    71: "slight snow fall", 73: "moderate snow fall", 75: "heavy snow fall", 77: "snow grains",
+    80: "slight rain showers", 81: "moderate rain showers", 82: "violent rain showers",
+    85: "slight snow showers", 86: "heavy snow showers",
+    95: "thunderstorm", 96: "thunderstorm with slight hail", 99: "thunderstorm with heavy hail",
+}
+
+
+def _http_get(url, timeout=6):
+    try:
+        req = urllib.request.Request(url, headers={"User-Agent": "SuperMaks/1.0"})
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            return r.read().decode("utf-8", "replace"), None
+    except (urllib.error.URLError, OSError, TimeoutError) as e:
+        return None, str(e)[:200]
+
+
+def _weather():
+    """Open-Meteo — free, no API key, no signup. https://open-meteo.com"""
+    url = (f"https://api.open-meteo.com/v1/forecast?latitude={_DELHI_LAT}&longitude={_DELHI_LON}"
+           "&current_weather=true&timezone=Asia%2FKolkata")
+    raw, err = _http_get(url)
+    if err:
+        return f"[weather fetch failed: {err}]"
+    try:
+        cw = json.loads(raw).get("current_weather") or {}
+    except json.JSONDecodeError as e:
+        return f"[weather fetch failed: bad response — {e}]"
+    temp, wind, code = cw.get("temperature"), cw.get("windspeed"), cw.get("weathercode")
+    if temp is None:
+        return "[weather fetch failed: no current_weather in response]"
+    desc = _WMO_WEATHER_CODES.get(code, "conditions unclear")
+    return f"New Delhi right now: {temp}°C, {desc}, wind {wind} km/h."
+
+
+def _delhi_news():
+    """Google News RSS search — free, no API key, no signup, no rate-limit
+    registration. https://news.google.com/rss/search?q=..."""
+    url = "https://news.google.com/rss/search?q=Delhi%20when:1d&hl=en-IN&gl=IN&ceid=IN:en"
+    raw, err = _http_get(url)
+    if err:
+        return f"[news fetch failed: {err}]"
+    try:
+        root = ET.fromstring(raw)
+    except ET.ParseError as e:
+        return f"[news fetch failed: bad response — {e}]"
+    titles = [(it.findtext("title") or "").strip()
+              for it in root.findall("./channel/item")[:6]]
+    titles = [t for t in titles if t]
+    return "\n".join(f"- {t}" for t in titles) if titles else "No recent Delhi headlines returned."
+
+
 def _wake_snapshot():
     py = _google_python()
     script = str(_GOOGLE_API)
@@ -207,16 +274,18 @@ def _wake_snapshot():
     today = day0.strftime("%Y-%m-%d")
 
     jobs = {
-        "gmail": [py, script, "gmail", "search", "is:unread", "--max", "5"],
-        "cal": [py, script, "calendar", "list",
-                "--start", day0.isoformat(), "--end", day1.isoformat(), "--max", "12"],
-        "gh": ["gh", "repo", "list", "--limit", "8",
-               "--json", "name,updatedAt,description,url"],
+        "gmail": lambda: _capture([py, script, "gmail", "search", "is:unread", "--max", "5"]),
+        "cal": lambda: _capture([py, script, "calendar", "list",
+                                  "--start", day0.isoformat(), "--end", day1.isoformat(), "--max", "12"]),
+        "gh": lambda: _capture(["gh", "repo", "list", "--limit", "8",
+                                 "--json", "name,updatedAt,description,url"]),
+        "weather": _weather,
+        "news": _delhi_news,
     }
 
     results = {k: "[not fetched]" for k in jobs}
-    with ThreadPoolExecutor(max_workers=3) as pool:
-        futs = {pool.submit(_capture, cmd): name for name, cmd in jobs.items()}
+    with ThreadPoolExecutor(max_workers=len(jobs)) as pool:
+        futs = {pool.submit(fn): name for name, fn in jobs.items()}
         for fut in as_completed(futs):
             results[futs[fut]] = fut.result()
 
@@ -236,7 +305,7 @@ def _wake_snapshot():
         lambda r: f"- {r.get('name','?')} · updated {r.get('updatedAt','?')}",
         "No GitHub repos returned.",
     )
-    return gmail, cal, gh
+    return gmail, cal, gh, results["weather"], results["news"]
 
 
 def _commands_reply():
@@ -292,33 +361,34 @@ def handle(message, runner=None):
 
     if cmd == "briefing":
         fetched_at = datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S %Z")
-        gmail_out, cal_out, gh_out = _wake_snapshot()
+        gmail_out, cal_out, gh_out, weather_out, news_out = _wake_snapshot()
         data = (
             f"Fetched live at {fetched_at} (not cached).\n\n"
             f"Gmail (top 5 unread):\n{gmail_out}\n\n"
             f"Calendar (primary, today local):\n{cal_out}\n\n"
-            f"GitHub repos (recently updated):\n{gh_out}"
+            f"GitHub repos (recently updated):\n{gh_out}\n\n"
+            f"New Delhi weather (Open-Meteo):\n{weather_out}\n\n"
+            f"Delhi headlines, last 24h (Google News):\n{news_out}"
         )
         return dict(message=(
-            "This is the wake briefing. The data below was fetched just now from Gmail, "
-            "Google Calendar, and GitHub — do not call tools again for any of it. Do not invent "
-            "an empty inbox if mail is listed. Empty JSON [] means that source really had nothing.\n\n"
+            "This is the wake briefing. All of the data below — Gmail, Google Calendar, GitHub, "
+            "weather, and news — was fetched just now by the dashboard itself. Do not call tools "
+            "again for any of it, including weather or news; both are already fresh. Do not invent "
+            "an empty inbox if mail is listed. Empty JSON [] means that source really had nothing. "
+            "A line starting with [ (e.g. \"[weather fetch failed: ...]\") means that source failed "
+            "— say so, don't invent a number or calm conditions in its place.\n\n"
             + data + "\n\n"
-            "None of that data covers weather or news, so for those two lines only, use a web "
-            "search or browser tool once each: check the current weather in New Delhi, India, and "
-            "check whether anything alarming or major is currently happening in or affecting Delhi.\n\n"
             "Then speak in this shape:\n"
             "1. Open with exactly: \"Welcome home, sir.\"\n"
             "2. One or two sentences with the one or two things that matter most from mail/calendar/"
             "GitHub. Real numbers, real names.\n"
-            "3. One short sentence on the current New Delhi weather.\n"
-            "4. If — and only if — something alarming or major is genuinely happening in Delhi right "
-            "now, one to two lines summarizing it; otherwise skip this line entirely, don't say "
+            "3. One short sentence on the current New Delhi weather, from the data above.\n"
+            "4. Skim the Delhi headlines above. If — and only if — one of them is genuinely alarming "
+            "or major, one to two lines summarizing it; otherwise skip this line entirely, don't say "
             "there's nothing to report.\n"
             "5. One dry, personal aside about something specific you noticed.\n"
             "6. Close with one short offer of something you could do.\n\n"
-            "Keep the whole thing tight — about six spoken sentences total. If a source failed, say "
-            "that source failed — do not treat a failure as an empty inbox or as calm weather/news."
+            "Keep the whole thing tight — about six spoken sentences total."
         ), note="wake briefing (live fetch)")
 
     if cmd == "github":

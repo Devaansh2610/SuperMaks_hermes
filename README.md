@@ -90,15 +90,15 @@ No audio file is bundled with this repo, and none ever will be — that would me
 redistributing someone else's copyrighted recording.
 
 It also opens whatever you list in `WAKE_TABS` at the same moment — each its
-own separate window, sized to `WAKE_WINDOW_SCALE` of the screen so they don't
-take it over, whatever you want waiting for you.
+own separate window, tiled instead of stacked: the first takes the left half
+of the screen, the rest quarter the right half, so several windows read at a
+glance instead of piling up.
 
 ```bash
 WAKE_SONG_SOURCE=open       # open a YouTube window (default) · local · off
 WAKE_SONG_URL=https://...   # the track
 WAKE_TABS=https://build.nvidia.com/models,https://www.youtube.com
 WAKE_BROWSER_APP=Safari     # what WAKE_TABS (and WAKE_SONG_SOURCE=open) opens in
-WAKE_WINDOW_SCALE=0.45      # each wake window as a fraction of the screen
 ```
 
 Opening `WAKE_TABS`, and the song window in `open` mode, both go through the
@@ -194,8 +194,7 @@ network unplugged.
 | `WAKE_SONG_URL` | The Clash | what `open` opens |
 | `WAKE_SONG_VOLUME` / `_DUCK` | `0.35` / `0.10` | local playback level, and level while speaking |
 | `WAKE_TABS` | NVIDIA NIM, YouTube | comma-separated links opened on wake; blank for none |
-| `WAKE_BROWSER_APP` | `Safari` | the .app macOS opens the wake links in, one separate new window per link |
-| `WAKE_WINDOW_SCALE` | `0.45` | each wake window's width/height as a fraction of the screen |
+| `WAKE_BROWSER_APP` | `Safari` | the .app macOS opens the wake links in, tiled: first = left half, rest = quarters of the right half |
 | `WAKE_IDLE_HOURS` | `4.5` | hours of quiet before it goes dormant again |
 | `SUPERMAKS_MAC_SSH_HOST/_USER/_KEY` | — | drive a *different* Mac over SSH for anything screen-related, if SuperMaks itself isn't running on the Mac (dual-Hermes, see `dual-setup/`); falls back to Hermes' own `~/.hermes/.env` SSH settings |
 | `HERMES_PROFILE` | `default` | profile whose tools are inherited |
@@ -226,8 +225,44 @@ currently no way to actually grant a dangerous-command approval from here. It
 shows up as a stall (flagged in the **Activity** panel, see below) that
 Hermes itself auto-denies and moves on from after its own approval timeout
 (60s by default). `bypass` sets `--yolo`, skipping that prompt (and the stall)
-entirely — decide per your own risk tolerance; there's no dashboard-side
-approve/deny yet.
+entirely.
+
+Given that, a broken "ask" is worse than no ask at all — so the more useful
+lever isn't `bypass` vs `normal`, it's Hermes' own `approvals.deny`
+(`~/.hermes/config.yaml`): fnmatch globs that **hard-block** a command before
+it ever reaches the approval prompt, cannot be bypassed even under `--yolo`,
+and return instantly instead of stalling. `dual-setup/lib.sh`'s
+`apply_command_denylist()` (run automatically by both setup scripts) wires up:
+
+```yaml
+approvals:
+  deny:
+    - "rm -rf*"
+    - "sudo*"
+    - "mkfs*"
+    - "dd *"
+    - "shutdown*"
+    - "reboot*"
+    - "kill -9*"
+    - "git reset --hard*"
+    - "git push --force*"
+    - "git push -f*"
+```
+
+Read-only/routine commands (`ssh`, `git status`, `ls`, `pwd`, `cat`, `mkdir`,
+`python`, `npm`, `uv`, ...) need no config at all — Hermes allows them by
+default already; verify any command's real verdict with
+`hermes approvals test -- <command>`.
+
+`persona.md` also tells the model to default to the terminal/SSH tool for
+anything on the Mac, and never reach for `computer_use` (GUI automation)
+unless the current message explicitly asks for screen/click interaction.
+
+There is still no dashboard-side approve/deny UI for commands that fall
+outside this fixed list (Hermes' own dangerous-pattern detector still flags
+things like an unfamiliar destructive command as "ask," which still stalls
+and auto-denies headless) — building one for real needs a pty-backed
+terminal bridge, a separate, larger project from the deny-list above.
 
 ## Troubleshooting
 

@@ -94,3 +94,39 @@ line_in_file() {
 }
 
 have() { command -v "$1" >/dev/null 2>&1; }
+
+# apply_command_denylist — hard-blocks a fixed set of destructive commands in
+# Hermes' OWN approvals.deny (fnmatch globs, checked before --yolo, cannot be
+# bypassed by the agent). This dashboard runs Hermes headless, so its normal
+# "ask-approval" prompt has no terminal to render on and just stalls ~60s
+# before auto-denying anyway — a hard deny is instant and gives the same
+# outcome honestly instead of silently. Idempotent: skips if already applied.
+# Read-only commands (ssh, git status, ls, pwd, cat, mkdir, python, npm, uv,
+# ...) need nothing — Hermes allows those by default already.
+apply_command_denylist() {
+  local cfg="$HOME/.hermes/config.yaml"
+  mkdir -p "$(dirname "$cfg")"; touch "$cfg"
+  if grep -q "SuperMaks: hard-blocked commands" "$cfg" 2>/dev/null; then
+    ok "command denylist already applied ($cfg)"
+    return 0
+  fi
+  cat >> "$cfg" <<'EOF'
+
+# ─── SuperMaks: hard-blocked commands ──────────────────────────────────
+# fnmatch globs against the full command line, matched BEFORE --yolo /
+# approvals.mode=off — cannot be bypassed by the agent.
+approvals:
+  deny:
+    - "rm -rf*"
+    - "sudo*"
+    - "mkfs*"
+    - "dd *"
+    - "shutdown*"
+    - "reboot*"
+    - "kill -9*"
+    - "git reset --hard*"
+    - "git push --force*"
+    - "git push -f*"
+EOF
+  ok "hard-blocked rm -rf / sudo / mkfs / dd / shutdown / reboot / kill -9 / git reset --hard / git push --force in $cfg"
+}
