@@ -21,6 +21,7 @@ import xml.etree.ElementTree as ET
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta
 
+import mac_bridge
 import voice
 
 ROOT = pathlib.Path(__file__).resolve().parent
@@ -135,7 +136,7 @@ def take_finished():
         return done
 
 
-_CMD = re.compile(r"^\s*/(new|profile|goal|personality|kanban|mission|missions|background|tools|toolsets|connectors|connect|status|commands|help|browser|clear|voice|briefing|github)\b\s*(.*)$", re.I | re.S)
+_CMD = re.compile(r"^\s*/(new|profile|goal|personality|kanban|mission|missions|background|tools|toolsets|connectors|connect|status|commands|help|browser|clear|voice|briefing|github|mac)\b\s*(.*)$", re.I | re.S)
 
 
 def _hermes_command(*args):
@@ -319,6 +320,7 @@ def _commands_reply():
 /kanban [task] — read/add mission queue item
 /mission [task] — alias for /kanban
 /background <mission> — run a Hermes mission asynchronously
+/mac <task> — real screen/GUI interaction on the Mac (clicks, typing into a window) — dispatched to the Mac's own Hermes session, not the Controller's
 /tools — show Hermes tool status from `hermes tools list`
 /connectors — explain that connected Hermes tools transfer into this dashboard
 /connect <name> — ask Hermes how to connect a third-party app generally
@@ -470,5 +472,20 @@ def handle(message, runner=None):
             return dict(message=None, reply="Background missions aren't available.", note="background unavailable")
         jid = start_background(arg, runner)
         return dict(message=None, reply=f"Background Hermes mission {jid} launched. I'll report when it lands.", note=f"mission {jid} started: {arg[:50]}")
+
+    if cmd == "mac":
+        # Real screen/GUI interaction (click, type into a specific window)
+        # can't happen through the normal chat path — that always talks to
+        # the Controller's own Hermes, which has no display of its own to
+        # automate under the dual-Hermes setup. This dispatches straight to
+        # the Mac Worker's Hermes session instead, over the same SSH channel
+        # mac_bridge already uses for wake windows — the one that actually
+        # has a screen and computer_use enabled.
+        if not arg:
+            return dict(message=None, reply="Tell me what to do on the Mac's screen after /mac.", note="mac empty")
+        if not mac_bridge.available():
+            return dict(message=None, reply="No Mac reachable — set SUPERMAKS_MAC_SSH_HOST, or run this on the Mac itself.", note="mac unreachable")
+        jid = start_background(arg, mac_bridge.run_hermes_on_mac)
+        return dict(message=None, reply=f"On it — dispatched to the Mac's own session ({jid}). I'll say when it lands.", note=f"mac gui mission {jid}: {arg[:50]}")
 
     return None

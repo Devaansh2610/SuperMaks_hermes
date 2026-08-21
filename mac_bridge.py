@@ -18,6 +18,7 @@ SSH backend — so the same connection doesn't have to be configured twice.
 import os
 import pathlib
 import shlex
+import shutil
 import subprocess
 import sys
 
@@ -92,3 +93,40 @@ def run(argv, timeout=None):
         detail = getattr(e, "stderr", None)
         detail = detail.strip()[:200] if detail else str(e)[:200]
         return False, detail
+
+
+def _hermes_argv_prefix():
+    """Only matters for the LOCAL case (this process already IS the Mac) —
+    over SSH, the remote shell's own PATH resolves plain "hermes" already,
+    same as osascript/open above rely on."""
+    if REMOTE:
+        return ["hermes"]
+    configured = os.environ.get("HERMES_CMD", "").strip()
+    if configured:
+        return shlex.split(configured)
+    exe = shutil.which("hermes")
+    return [exe] if exe else ["hermes"]
+
+
+def run_hermes_on_mac(request, timeout=180):
+    """Delegate a request that genuinely needs real screen/GUI interaction to
+    the Mac's OWN Hermes session — the one with a real display and
+    computer_use actually usable — instead of a Controller-side Hermes
+    profile trying (and failing) to automate whatever machine IT happens to
+    be running on. Runs locally if this process already IS the Mac; over SSH
+    via run() above otherwise. A generator yielding delta/error events, so
+    it plugs directly into commands.start_background() as a runner.
+    """
+    prompt = ("You have a real screen here and computer_use is enabled — use "
+              "it freely for this request. Keep the reply to one or two "
+              f"short spoken sentences, no narration of the clicks.\n\n"
+              f"Request: {request}")
+    argv = _hermes_argv_prefix() + [
+        "chat", "-q", prompt, "--no-restore-cwd",
+        "--source", "supermaks-mac-gui", "-t", "computer_use",
+    ]
+    ok, out = run(argv, timeout=timeout)
+    if ok:
+        yield dict(t="delta", text=out)
+    else:
+        yield dict(t="error", message=out)
