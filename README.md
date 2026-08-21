@@ -12,6 +12,15 @@ on, with whatever it is connected to.
 Open `preview.html` (or `ui/index.html`) in a browser to see the interface right
 now — with no key and no Hermes, it boots against a mock backend.
 
+**This branch (`dual-hermes`)** additionally supports running the dashboard on
+a separate Ubuntu box that drives the Mac over SSH for anything screen-related
+(computer_use), instead of everything running on one Mac. If that's your
+setup, start with [`dual-setup/README.md`](dual-setup/README.md) — two
+scripts, one per machine, that walk through the whole thing. Everything below
+is still accurate either way; `mac_bridge.py` (see **Security**) is what makes
+the Mac-only bits (wake windows, screen size) work locally on the single-Mac
+setup or over SSH on the dual-machine one, automatically.
+
 ---
 
 ## Install
